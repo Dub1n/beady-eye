@@ -901,7 +901,9 @@ fn rooting_the_forest_at_a_later_copy_draws_what_rooting_at_the_first_does() {
             // A one-copy rule rests the later copy's way shut.
             let guying = lines_of(&forest, "dun-3.2")[0];
             step_onto(&mut forest, guying);
-            forest.apply(Action::ExpandOrChild);
+            if forest.lines()[guying].folded == Some(false) {
+                forest.apply(Action::ToggleFold);
+            }
             let at = copies_of(&forest, "dun-6")[copy];
             step_onto(&mut forest, at);
             assert!(forest.apply(Action::FocusForest));
@@ -1040,7 +1042,7 @@ fn open_everything(forest: &mut Forest) {
         |forest| {
             let at = shut_fold(forest).expect("a fold to open");
             forest.select_line(at);
-            forest.apply(Action::ExpandOrChild);
+            forest.apply(Action::ToggleFold);
         },
         |forest| format!("a fold would not open: {:#?}", sketch(forest)),
     );
@@ -1170,4 +1172,271 @@ fn live_work_arriving_on_a_bead_the_focused_tree_shares_spends_a_fold_shut_over_
         "{:#?}",
         sketch(&forest)
     );
+}
+
+/// Right enters the selected bead's scope without moving the selection;
+/// Left reveals its containing level, while retaining that same bead.
+#[test]
+fn right_focus_and_left_reveal_preserve_the_selected_bead() {
+    let mut forest = flatten_compact(snapshot());
+    select_bead(&mut forest, "dun-7.1");
+    let selected = cursor(&forest).cloned();
+
+    assert!(forest.apply(Action::ExpandOrChild));
+    assert!(forest.is_focused());
+    assert_eq!(cursor(&forest), selected.as_ref());
+    assert_eq!(forest.focused_on(), [key("dunwich", "dun-7.1")].into());
+
+    assert!(forest.apply(Action::CollapseOrParent));
+    assert!(forest.is_focused());
+    assert_eq!(cursor(&forest), selected.as_ref());
+    assert_eq!(forest.focused_on(), [key("dunwich", "dun-7")].into());
+}
+
+/// Home returns to CurrentWork and the full forest after focus navigation.
+#[test]
+fn home_restores_the_default_scope() {
+    let mut forest = flatten_compact(snapshot());
+    select_bead(&mut forest, "dun-7.1");
+    forest.apply(Action::ExpandOrChild);
+
+    assert!(forest.apply(Action::Home));
+    assert!(!forest.is_focused());
+    assert_eq!(forest.snapshot().filter, Filter::CurrentWork);
+}
+
+/// A tagged bead is masked in place while a real child remains reachable;
+/// fixture visibility never removes source nodes or shifts their indices.
+#[test]
+fn fixture_mask_preserves_mixed_tree_paths_and_indices() {
+    let mut tree = tree_of("dunwich", DUNWICH);
+    let fixture = tree
+        .beads
+        .iter_mut()
+        .find(|bead| bead.id == "dun-7.1")
+        .expect("fixture node");
+    fixture.disposable_fixture = true;
+    fixture.status = crate::model::types::Status::Closed;
+    tree.beads
+        .iter_mut()
+        .find(|bead| bead.id == "dun-7.1.1")
+        .expect("fixture leaf")
+        .disposable_fixture = true;
+    let original_len = tree.beads.len();
+    let snapshot = gather(vec![tree], Vec::new(), Filter::CurrentWork);
+    let mut forest = flatten_compact(snapshot);
+    forest.apply(Action::ExpandForest);
+
+    assert_eq!(forest.hidden_fixture_count(), 2);
+    assert_eq!(forest.snapshot().collected[0].beads.len(), original_len);
+    assert!(
+        sketch(&forest)
+            .iter()
+            .any(|line| line.contains("[fixture context]")),
+        "mixed fixture ancestor should be context: {:#?}",
+        sketch(&forest)
+    );
+    assert!(
+        forest.lines().iter().any(|line| {
+            line.place
+                .as_ref()
+                .is_some_and(|place| place.key() == &key("dunwich", "dun-7.1.2"))
+        }),
+        "real child should survive fixture masking: {:#?}",
+        sketch(&forest)
+    );
+    assert_eq!(
+        forest.snapshot().collected[0]
+            .beads
+            .iter()
+            .find(|bead| bead.id == "dun-7.1")
+            .unwrap()
+            .status,
+        crate::model::types::Status::Closed,
+        "fixture masking must preserve the source marker"
+    );
+
+    assert!(forest.apply(Action::ToggleFixtures));
+    assert_eq!(forest.hidden_fixture_count(), 0);
+    assert!(sketch(&forest)
+        .iter()
+        .any(|line| line.contains("re-point the dish")));
+}
+
+/// Closing the focused bead during refresh leaves both its scope and selection
+/// on that bead while unfinished descendants remain reachable.
+#[test]
+fn a_refresh_that_closes_the_selected_bead_keeps_its_scope_and_selection() {
+    let mut forest = flatten_compact(snapshot());
+    select_bead(&mut forest, "dun-7.1");
+    forest.apply(Action::ExpandOrChild);
+    let selected = cursor(&forest).cloned();
+    let changed = edited(
+        DUNWICH,
+        r#""id":"dun-7.1","title":"re-point the dish","status":"open""#,
+        r#""id":"dun-7.1","title":"re-point the dish","status":"closed""#,
+    );
+
+    forest.refresh(gather(
+        vec![tree_of("dunwich", &changed)],
+        Vec::new(),
+        Filter::CurrentWork,
+    ));
+
+    assert_eq!(
+        forest.preserve_completed.as_ref(),
+        Some(&key("dunwich", "dun-7.1"))
+    );
+    assert_eq!(cursor(&forest), selected.as_ref());
+    assert!(forest.is_focused());
+    assert!(sketch(&forest)
+        .iter()
+        .any(|line| line.contains("seal the feed horn")));
+}
+
+/// History draws collected closed roots immediately; returning to CurrentWork
+/// removes the unrelated historical root.
+#[test]
+fn scope_cycle_reveals_and_hides_a_closed_root_without_recollection() {
+    let closed = r#"[{"id":"hbr-99","title":"old harbour work","status":"closed","closed_at":"2026-08-28T09:00:00Z"}]"#;
+    let snapshot = gather(
+        vec![tree_of("dunwich", DUNWICH), tree_of("harbour", closed)],
+        Vec::new(),
+        Filter::CurrentWork,
+    );
+    let mut forest = flatten_compact(snapshot);
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("old harbour work")));
+
+    forest.apply(Action::NextScope);
+    assert_eq!(forest.snapshot().filter, Filter::Activity);
+    forest.apply(Action::NextScope);
+    assert_eq!(forest.snapshot().filter, Filter::History);
+    assert!(sketch(&forest)
+        .iter()
+        .any(|line| line.contains("old harbour work")));
+    assert!(forest
+        .snapshot()
+        .collected
+        .iter()
+        .any(|tree| tree.root == "hbr-99"));
+
+    forest.apply(Action::NextScope);
+    assert_eq!(forest.snapshot().filter, Filter::CurrentWork);
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("old harbour work")));
+}
+
+/// Pure fixture roots remain in History's source data but are masked until x
+/// enables their display; toggling back hides them again.
+#[test]
+fn fixture_override_reveals_pure_fixture_roots_in_history() {
+    let mut tree = tree_of("dunwich", DUNWICH);
+    for bead in &mut tree.beads {
+        bead.disposable_fixture = true;
+    }
+    let snapshot = gather(vec![tree], Vec::new(), Filter::History);
+    let mut forest = flatten_compact(snapshot);
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("re-point the dish")));
+    assert!(forest.hidden_fixture_count() > 0);
+
+    forest.apply(Action::ToggleFixtures);
+    assert!(sketch(&forest)
+        .iter()
+        .any(|line| line.contains("re-point the dish")));
+    assert_eq!(forest.hidden_fixture_count(), 0);
+
+    forest.apply(Action::ToggleFixtures);
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("re-point the dish")));
+}
+
+/// The completed toggle reveals closed children without broadening the root scope.
+#[test]
+fn completed_toggle_keeps_current_scope_and_reveals_closed_children() {
+    let snapshot = gather(
+        vec![tree_of("dunwich", DUNWICH)],
+        Vec::new(),
+        Filter::CurrentWork,
+    );
+    let mut forest = flatten_compact(snapshot);
+    forest.apply(Action::ExpandForest);
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("clear the access road")));
+
+    forest.apply(Action::ToggleCompleted);
+    assert_eq!(forest.snapshot().filter, Filter::CurrentWork);
+    assert!(sketch(&forest)
+        .iter()
+        .any(|line| line.contains("clear the access road")));
+}
+
+/// A count made before scrolling must describe exactly the rows materialized
+/// later, including hidden closed siblings and masked fixture ancestors.
+#[test]
+fn compact_lazy_counts_match_eager_rows_under_both_visibility_toggles() {
+    let mut tree = tree_of("dunwich", SIDING);
+    let fixture = tree
+        .beads
+        .iter_mut()
+        .find(|bead| bead.id == "sdg-4.1")
+        .unwrap();
+    fixture.disposable_fixture = true;
+    let source = gather(vec![tree], Vec::new(), Filter::CurrentWork);
+    for fixtures in [false, true] {
+        for completed in [false, true] {
+            let mut lazy = flatten_compact(source.clone());
+            if fixtures {
+                lazy.apply(Action::ToggleFixtures);
+            }
+            if completed {
+                lazy.apply(Action::ToggleCompleted);
+            }
+            lazy.apply(Action::ExpandForest);
+            let counted = lazy.lines().len();
+            let lines: Vec<Line> = lazy.lines().iter().cloned().collect();
+            assert_eq!(lines.len(), counted);
+            let mut eager = lazy;
+            for line in &lines {
+                if line.folded.is_some() {
+                    eager.folds.set(handle_of(line).unwrap(), true);
+                }
+            }
+            eager.lay_out();
+            assert_eq!(eager.lines().iter().cloned().collect::<Vec<_>>(), lines);
+            assert_eq!(eager.lines().len(), counted);
+            assert_eq!(eager.snapshot().collected, source.collected);
+        }
+    }
+}
+
+#[test]
+fn closing_an_inspected_leaf_keeps_it_until_home_without_focus() {
+    let source = r#"[
+        {"id":"ctx-1","title":"context root","status":"open"},
+        {"id":"ctx-1.1","title":"inspected leaf","status":"open",
+         "dependencies":[{"depends_on_id":"ctx-1","type":"parent-child"}]}
+    ]"#;
+    let snap = |json: &str| {
+        gather(
+            vec![tree_of("dunwich", json)],
+            Vec::new(),
+            Filter::CurrentWork,
+        )
+    };
+    let mut forest = flatten_compact(snap(source));
+    forest.apply(Action::ExpandForest);
+    select_bead(&mut forest, "ctx-1.1");
+    forest.refresh(snap(&source.replace("\"open\"", "\"closed\"")));
+    assert_eq!(cursor(&forest), Some(&key("dunwich", "ctx-1.1")));
+    assert_eq!(forest.lines().len(), forest.lines().iter().count());
+    forest.apply(Action::Home);
+    assert!(!drawn_here(&forest, "inspected leaf"));
+    assert_eq!(forest.snapshot().collected[0].beads.len(), 2);
 }

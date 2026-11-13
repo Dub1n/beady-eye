@@ -20,6 +20,7 @@ pub mod environment;
 pub mod gates;
 pub mod github;
 pub mod herdr;
+pub mod omo;
 pub mod panes;
 pub mod pr_events;
 pub mod run;

@@ -1015,13 +1015,19 @@ mod tests {
     /// naming the program would have to read.
     #[test]
     fn a_wrapper_that_is_not_installed_is_named_rather_than_the_shell() {
-        let wrapper = Command::Line("no-such-wrapper-anywhere exec .".to_string());
+        // An absolute absent executable avoids host PATH entries whose access
+        // permissions can turn an otherwise missing executable into EACCES.
+        let missing = std::env::temp_dir()
+            .join(format!("bdi-absent-wrapper-{}", std::process::id()))
+            .join("no-such-wrapper-anywhere");
+        let program = missing.to_string_lossy().into_owned();
+        let wrapper = Command::Words(vec![program.clone(), "exec".into(), ".".into()]);
 
         let failure = entering(Path::new("."), &RealRunner, &wrapper).unwrap_err();
 
         assert_eq!(failure.kind, FailureKind::NotInstalled);
         assert_eq!(
-            failure.program, "no-such-wrapper-anywhere",
+            failure.program, program,
             "the wrapper's own absence went on record as the shell's"
         );
     }

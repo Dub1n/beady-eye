@@ -397,7 +397,7 @@ impl Shown {
     /// rows on the band stand until the answer lands: a band that said it
     /// was reading the pane every time it did would say nothing else.
     fn reread(&mut self, now: DateTime<Utc>) {
-        if self.reading != Reading::Nothing || !self.due.is_some_and(|due| due <= now) {
+        if self.reading != Reading::Nothing || self.due.is_none_or(|due| due > now) {
             return;
         }
         if let Some(pane) = self.tailing.clone() {
@@ -1157,7 +1157,14 @@ enum Over<'a> {
 fn keys_under(over: &Over<'_>, forest: &Forest) -> Vec<String> {
     match over {
         Over::Bead(_) => bead_key_rows(),
-        Over::Nothing | Over::Bindings => forest_key_rows(forest.is_focused()),
+        Over::Nothing | Over::Bindings => {
+            let state = forest.footer_state();
+            let plain = forest_key_rows(forest.is_focused());
+            let mut rows: Vec<_> = plain.iter().map(|row| format!("{row}   {state}")).collect();
+            rows.extend(plain);
+            rows.push(format!("{state}  ? keys"));
+            rows
+        }
     }
 }
 
@@ -1362,7 +1369,11 @@ mod tests {
     use crate::model::types::{Edge, PaneStatus, Status};
     use crate::tui::fixtures::{a_snapshot, arkham, ferry, reading, PATIENCE};
     use crate::tui::keys::tests::key;
-    use crate::tui::keys::{action, key_row, AT_THE_PROMPT, BINDINGS};
+    use crate::tui::keys::{action, key_row as raw_key_row, AT_THE_PROMPT, BINDINGS};
+    // These structural fixtures open on the all-records (History) scope.
+    fn key_row() -> String {
+        format!("{}   History z- x0", raw_key_row())
+    }
     use crate::view::bindings::{bindings_block, bindings_window};
     use crate::view::forest::Spine;
     use crate::view::lines::{Content, GroupKind};
@@ -1527,10 +1538,13 @@ mod tests {
                 "  Enter     show the selected bead, or focus its pane from the bead view",
                 "  f         focus the selected bead's pane",
                 "  Space     fold or unfold the selected node",
-                "  a         show every tree, not only those with a live agent",
+                "  a         show every tree in the collected snapshot",
+                "  z         show or hide completed beads within the current scope",
+                "  x         show or hide configured disposable fixture records",
                 "  ?         show these key bindings",
                 "  r         list only ready beads, in the forest or a view; again for all",
-                "  v         open the next view, keeping r; after the last, leave the views",
+                "  v         cycle Current, Activity, and History",
+                "  V         open the next view, keeping r; after the last, leave the views",
                 "  s         cycle which copy of a bead opens, under the selected node",
                 "  S         cycle which copy of a bead opens, across the whole forest",
                 "  F         draw the selected bead as the only root, or put the forest back",
@@ -1551,11 +1565,12 @@ mod tests {
                 "  y         copy the selected bead's id to the clipboard",
                 "  Down, j   move down one row",
                 "  Up, k     move up one row",
-                "  Right, l  expand, or move to the first child when it is already expanded",
-                "  Left, h   collapse, or move to the parent when it is already collapsed",
+                "  Right, l  focus the selected subtree",
+                "  Left, h   select parent; at displayed root, reveal parent level",
                 "  ^D, PgDn  move down half a screen",
                 "  ^U, PgUp  move up half a screen",
-                "  Home, g   move to the first row",
+                "  Home      restore the default current-work forest",
+                "  g         move to the first row",
                 "  End, G    move to the last row",
                 "  Enter     while searching, stay on the bead the search has gone to",
                 "  Esc       while searching, stop and put the forest back",
@@ -1598,7 +1613,7 @@ mod tests {
         );
         assert_eq!(
             row_naming(&drawn, "Right, l"),
-            "  Right, l  expand, or move to the …"
+            "  Right, l  focus the selected subt…"
         );
         assert_eq!(
             drawn.len(),
@@ -1677,6 +1692,8 @@ mod tests {
 
     fn a_grove_of(children: Vec<usize>) -> Snapshot {
         let bead = |id: String| Node {
+            activity: None,
+            disposable_fixture: false,
             project: "grove".to_string(),
             id,
             title: "a bead in the grove".to_string(),
@@ -1803,7 +1820,7 @@ mod tests {
             paint(
                 frame,
                 forest,
-                &Layout::default(),
+                &Layout::legacy(),
                 draw::Band {
                     tail,
                     background: Background::Dark,
@@ -2123,7 +2140,9 @@ mod tests {
     /// A config settling exactly what every screen here already draws to, so
     /// a test whose subject is the foot is a test about the foot alone.
     fn the_config_in_force() -> Config {
-        Config::naming(Vec::new())
+        let mut config = Config::naming(Vec::new());
+        config.row = Layout::legacy();
+        config
     }
 
     /// What every screen here draws to, unless its own subject is one of the
@@ -2133,7 +2152,7 @@ mod tests {
             tail_every: EVERY,
             background: Background::Dark,
             notch: A_NOTCH,
-            layout: Layout::default(),
+            layout: Layout::legacy(),
             crops: config::Tail::default(),
         }
     }
@@ -2656,7 +2675,7 @@ mod tests {
     #[test]
     fn the_window_colours_the_id_the_forest_can_go_to_and_not_the_one_it_cannot() {
         let mut shown = shown(a_grove_naming_a_bead_under_no_root());
-        shown.apply(Action::ExpandOrChild);
+        assert!(shown.forest.go_to(&bead("grove", "grv-1.1")));
         assert!(shown.apply(Action::ShowBead));
 
         let runs = window_runs(&mut shown, 80, 24);
@@ -2683,7 +2702,7 @@ mod tests {
     /// The window open on `grv-1.1`, which is the bead that names the others.
     fn shown_on_the_bead_that_names_beads() -> Shown {
         let mut shown = shown(a_grove_that_names_its_beads());
-        shown.apply(Action::ExpandOrChild);
+        assert!(shown.forest.go_to(&bead("grove", "grv-1.1")));
         assert_eq!(cursor(&shown), Some(&bead("grove", "grv-1.1")));
         assert!(shown.apply(Action::ShowBead));
         shown
@@ -2710,7 +2729,7 @@ mod tests {
     #[test]
     fn a_bead_the_description_names_is_listed_and_can_be_followed() {
         let mut shown = shown(a_grove_whose_description_names_beads());
-        shown.apply(Action::ExpandOrChild);
+        assert!(shown.forest.go_to(&bead("grove", "grv-1.1")));
         assert!(shown.apply(Action::ShowBead));
 
         let page = bead_page(&mut shown, 80, 30);
@@ -3242,7 +3261,7 @@ mod tests {
         }
         snapshot.trees = snapshot.collected.clone();
         let mut shown = shown(snapshot);
-        shown.apply(Action::ExpandOrChild);
+        assert!(shown.forest.go_to(&bead("grove", "grv-1.1")));
         assert!(shown.apply(Action::ShowBead));
 
         let forest = forest_band(&mut shown, 120, 40).join("\n");
@@ -4688,9 +4707,13 @@ mod tests {
 
         let foot = foot_of(&mut shown, 67, 24);
 
-        assert_eq!(
-            foot.trim_end(),
-            "\u{26a0} no herdr session \u{b7} agents are not shown"
+        assert!(
+            foot.starts_with("\u{26a0} no herdr session \u{b7} agents are not shown"),
+            "{foot:?}"
+        );
+        assert!(
+            foot.trim_end().ends_with("History z- x0  ? keys"),
+            "{foot:?}"
         );
     }
 

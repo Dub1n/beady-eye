@@ -648,6 +648,10 @@ fn answered(
                 | Action::CycleSpine
                 | Action::CycleSpineForest
                 | Action::ToggleFilter
+                | Action::ToggleFixtures
+                | Action::ToggleCompleted
+                | Action::Home
+                | Action::NextScope
                 | Action::ToggleReadyList
                 | Action::NextView
                 | Action::ToggleTail
@@ -1284,7 +1288,7 @@ pub(super) mod tests {
         let (ask, _asked) = mpsc::channel();
         let events = pressing([
             key(KeyCode::Char('?')),
-            key(KeyCode::Char('z')),
+            key(KeyCode::F(12)),
             key(KeyCode::Char('?')),
             key(KeyCode::Char('j')),
         ]);
@@ -3987,7 +3991,7 @@ pub(super) mod tests {
 
         drive(
             &mut view,
-            &waiting(vec![Event::Key(key(KeyCode::Char('z')))]),
+            &waiting(vec![Event::Key(key(KeyCode::F(12)))]),
             &ask,
             at_once(),
             a_run_reading(nothing_armed()),
@@ -4012,7 +4016,7 @@ pub(super) mod tests {
 
         drive(
             &mut view,
-            &waiting(vec![Event::Key(key(KeyCode::Char('z')))]),
+            &waiting(vec![Event::Key(key(KeyCode::F(12)))]),
             &ask,
             at_once(),
             a_run_reading(nothing_armed()),
@@ -4145,7 +4149,7 @@ pub(super) mod tests {
 
         drive(
             &mut view,
-            &waiting(vec![Event::Resize, Event::Key(key(KeyCode::Char('z')))]),
+            &waiting(vec![Event::Resize, Event::Key(key(KeyCode::F(12)))]),
             &ask,
             at_once(),
             a_run_reading(nothing_armed()),

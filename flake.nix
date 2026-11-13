@@ -1976,6 +1976,21 @@
             package && /^version *=/ { print $2; exit }
           ' Cargo.toml)"
 
+          # Fork builds are installed from their own source, before a release
+          # tag exists. Check the copied command against Cargo's repository;
+          # never invent an upstream release pin for a fork-only version.
+          repository="$(awk -F'"' '
+            /^\[/ { package = ($0 == "[package]") }
+            package && /^repository *=/ { print $2; exit }
+          ' Cargo.toml)"
+          if [ -n "$repository" ] && [ "$repository" != "https://github.com/CodeForBreakfast/beady-eye" ]; then
+            if ! grep -qF "cargo install --git $repository --locked" README.md; then
+              echo "README no longer installs the declared fork repository with --locked."
+              exit 1
+            fi
+            exit 0
+          fi
+
           pins="$(grep -oE 'github:CodeForBreakfast/beady-eye/[^"[:space:]]+' README.md |
             sed 's|^github:CodeForBreakfast/beady-eye/||' | sort -u)"
 
@@ -2063,6 +2078,14 @@
           readme "$unpinned
 $pinned"
           accepts "an unpinned reference was read as a pin:"
+
+          printf '[package]\nversion = "0.2.0"\nrepository = "https://github.com/example/fork"\n' > "$tree/Cargo.toml"
+          readme 'cargo install --git https://github.com/example/fork --locked'
+          accepts "it refused a source-installed fork:"
+          readme 'cargo install --git https://github.com/example/other --locked'
+          refuses "it accepted another fork:" "declared fork repository"
+          readme 'cargo install --git https://github.com/example/fork'
+          refuses "it accepted a fork command without a locked build:" "--locked"
 
           touch $out
         '';

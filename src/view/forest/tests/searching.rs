@@ -34,7 +34,7 @@ fn a_search_matches_part_of_an_id() {
 #[test]
 fn a_search_matches_the_shortened_id_the_row_draws() {
     let mut forest = flatten(snapshot());
-    let drawn = row_of(&forest, "dun-7.1").id.clone();
+    let drawn = row_of(&forest, "dun-7.1").display_id.clone();
 
     assert_eq!(
         forest.seek_here(&drawn),

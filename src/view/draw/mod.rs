@@ -370,6 +370,8 @@ mod tests {
 
     pub(super) fn node(id: &str, title: &str, status: Status) -> Node {
         Node {
+            activity: None,
+            disposable_fixture: false,
             project: "summit-works".to_string(),
             id: id.into(),
             title: title.into(),
@@ -469,7 +471,7 @@ mod tests {
             fitted(
                 &under("└┄┄ ", Content::Orphaned(orphaned)),
                 &ids(7),
-                &Layout::default(),
+                &Layout::legacy(),
                 &at_rest(),
             ),
             96,
@@ -498,7 +500,7 @@ mod tests {
             fitted(
                 &under(LAST, Content::Note(Note::OrphanedDependencies(2))),
                 &ids(0),
-                &Layout::default(),
+                &Layout::legacy(),
                 &at_rest(),
             ),
             96,
@@ -520,7 +522,7 @@ mod tests {
             fitted(
                 &under("", Content::Note(Note::NoRoots)),
                 &ids(0),
-                &Layout::default(),
+                &Layout::legacy(),
                 &at_rest(),
             ),
             96,
@@ -641,7 +643,14 @@ mod tests {
     /// what these tests are about is the rows under one.
     pub(super) fn opened(snapshot: &Snapshot) -> Forest {
         let mut forest = flatten(snapshot.clone());
-        forest.apply(Action::ToggleFold);
+        forest.laid_out_to(Layout::legacy());
+        forest.apply(Action::ExpandForest);
+        forest
+    }
+
+    fn legacy_forest(snapshot: Snapshot) -> Forest {
+        let mut forest = flatten(snapshot);
+        forest.laid_out_to(Layout::legacy());
         forest
     }
 
@@ -690,7 +699,7 @@ mod tests {
                 frame,
                 regions(frame.area(), forest.lines().len(), TailBand::Shown),
                 forest,
-                &Layout::default(),
+                &Layout::legacy(),
                 collecting,
                 &[],
                 drawn_at(),
@@ -720,7 +729,7 @@ mod tests {
                     frame,
                     regions(frame.area(), forest.lines().len(), TailBand::Shown),
                     &forest,
-                    &Layout::default(),
+                    &Layout::legacy(),
                     &[],
                     &[],
                     drawn_at(),
@@ -855,7 +864,7 @@ mod tests {
         snapshot.trees = vec![Arc::new(shown)];
         snapshot.hidden_trees = vec![HiddenTree::of(&held_back)];
 
-        let frame = frame_of(&flatten(snapshot), 60, 8).rows();
+        let frame = frame_of(&legacy_forest(snapshot), 60, 8).rows();
 
         assert!(
             frame
@@ -929,7 +938,7 @@ mod tests {
     /// the row it is on is drawn.
     #[test]
     fn the_selected_row_is_drawn_wherever_the_selection_has_moved_to() {
-        let mut forest = flatten(snapshot(
+        let mut forest = legacy_forest(snapshot(
             vec![grove(40)],
             Vec::new(),
             ProviderState::Answering,
@@ -994,7 +1003,7 @@ mod tests {
     fn a_root_that_would_not_read_draws_its_reason_and_its_projects_panes() {
         let failed =
             Tree::tracker_unreachable("summit-works", "smt-4kd3p", TrackerFailure::Unavailable);
-        let forest = flatten(snapshot(
+        let forest = legacy_forest(snapshot(
             vec![failed],
             vec![pane("wCM:p9", PaneStatus::Working)],
             ProviderState::Answering,
@@ -1050,7 +1059,7 @@ render = "{}"
             drawn_at(),
         );
 
-        let frame = frame_of(&flatten(snapshot), 120, 40).rows();
+        let frame = frame_of(&legacy_forest(snapshot), 120, 40).rows();
 
         for bead in ["dun-v1", "dun-v2", "dun-v3", "dun-v4", "dun-v5", "dun-v6"] {
             assert!(
@@ -1096,7 +1105,7 @@ render = "{}"
     fn a_root_with_nothing_under_it_draws_no_marker_and_still_lines_up() {
         let unreadable =
             Tree::tracker_unreachable("summit-works", "smt-4kd3p", TrackerFailure::Unavailable);
-        let forest = flatten(snapshot(
+        let forest = legacy_forest(snapshot(
             vec![grove(2), unreadable],
             Vec::new(),
             ProviderState::Answering,

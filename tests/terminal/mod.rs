@@ -222,10 +222,17 @@ pub fn a_home_naming_one_project(named: &str) -> PathBuf {
 /// `bdi` does with a config a person could have written.
 pub fn a_home_naming_one_project_settled(named: &str, settings: &str) -> PathBuf {
     let home = an_empty_home(named);
+    // Existing PTY tests explicitly exercise the upstream glyph-and-ID layout.
+    // Compact-view tests opt in with their own [row] table below.
+    let legacy = if settings.contains("[row]") {
+        ""
+    } else {
+        "\n[row]\ncompact=false\nshow_ids=true\nindent=4\nidentity=['glyph','id']\n"
+    };
     std::fs::write(
         home.join(".config/beady-eye/config.toml"),
         format!(
-            "[[projects]]\nname = \"arkham\"\npath = \"{}\"\n{settings}",
+            "[[projects]]\nname = \"arkham\"\npath = \"{}\"\n{settings}{legacy}",
             home.display()
         ),
     )

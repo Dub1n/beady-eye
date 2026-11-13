@@ -328,10 +328,10 @@ fn delivered_through<'a>(
 ) -> (Vec<PullRequest<'a>>, bool) {
     let counts = |node: &Node| {
         wanted(&node.status)
-            && !delivery
+            && delivery
                 .outside_key
                 .as_ref()
-                .is_some_and(|key| node.metadata.get(key).map(String::as_str) == Some("true"))
+                .is_none_or(|key| node.metadata.get(key).map(String::as_str) != Some("true"))
     };
     let pull_request = |node: &Node| {
         counts(node)

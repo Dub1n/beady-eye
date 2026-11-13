@@ -17,12 +17,20 @@ use crate::model::join::BeadKey;
 use crate::model::types::Bead;
 use crate::view::row::{Cell, Layout};
 
+mod fixtures;
+pub use fixtures::FixtureFilter;
 mod views;
 pub use views::View;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Optional passive native activity readers, keyed by configured project.
+    #[serde(default)]
+    pub omo: BTreeMap<String, crate::collect::omo::OmoConfig>,
+    /// Exact, opt-in disposable fixture provenance, keyed by project.
+    #[serde(default)]
+    pub fixture_filters: BTreeMap<String, FixtureFilter>,
     #[serde(default)]
     pub projects: Vec<Project>,
     #[serde(default)]
@@ -1019,6 +1027,8 @@ impl Config {
     /// setting at its default: what discovery builds where no file says more.
     pub fn naming(projects: Vec<Project>) -> Self {
         Config {
+            omo: BTreeMap::new(),
+            fixture_filters: BTreeMap::new(),
             projects,
             roots: Roots::default(),
             badges: Vec::new(),
@@ -1177,6 +1187,24 @@ impl Config {
                     ids.join(", "),
                     names_of(&cfg.projects).join(", ")
                 );
+            }
+        }
+        if cfg.row.indent == 0 || cfg.row.indent > 16 {
+            anyhow::bail!("[row] indent must be between 1 and 16 cells");
+        }
+        for (project, filter) in &cfg.fixture_filters {
+            if !filter.valid() {
+                anyhow::bail!("[fixture_filters.{project}] requires title, created_by and a nonempty description or close_reason");
+            }
+        }
+        for (project, adapter) in &cfg.omo {
+            adapter
+                .validate()
+                .map_err(|reason| anyhow::anyhow!("[omo.{project}]: {reason}"))?;
+        }
+        for project in cfg.omo.keys().chain(cfg.fixture_filters.keys()) {
+            if !cfg.is_configured(project) {
+                anyhow::bail!("activity or fixture filter names unknown project {project}");
             }
         }
         cfg.refuse_views_that_cannot_list()?;
@@ -1714,6 +1742,7 @@ path = "/home/user/dev/kadath"
                 title: vec![Cell::Title, Cell::Badges],
                 state: vec![Cell::Agent, Cell::Anomalies, Cell::Progress],
                 open_id: Colour::Status,
+                ..Layout::default()
             },
             "a list left out is the default's, and one written is read as written"
         );
@@ -3482,5 +3511,30 @@ worktrees = ["/home/user/anywhere-at-all"]
         .to_string();
 
         assert!(err.contains("worktrees"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod passive_config_tests {
+    use super::*;
+    const PROJECT: &str = "[[projects]]\nname='arkham'\npath='/srv/work/arkham'\n";
+    #[test]
+    fn native_configuration_is_explicit_and_checked() {
+        let cfg = Config::from_toml(&format!("{PROJECT}[omo.arkham]\ntask_directory='/srv/agents/tasks'\n[row]\nindent=1\nascii=true\n")).unwrap();
+        assert!(cfg.row.ascii);
+        assert_eq!(cfg.row.indent, 1);
+        assert!(cfg.row.compact);
+        assert!(!cfg.row.show_ids);
+        for invalid in [
+            "[omo.unknown]\ntask_directory='/srv/tasks'\n",
+            "[omo.arkham]\ntask_directory='relative/tasks'\n",
+            "[omo.arkham]\ntask_directory='/srv/tasks'\nfreshnes_seconds=1\n",
+            "[row]\nindent=0\n",
+        ] {
+            assert!(
+                Config::from_toml(&format!("{PROJECT}{invalid}")).is_err(),
+                "{invalid}"
+            );
+        }
     }
 }

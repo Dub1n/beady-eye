@@ -1,14 +1,14 @@
-id = "codeforbreakfast.beady-eye"
+id = "dub1n.beady-eye"
 name = "beady-eye"
-version = "0.40.0"
+version = "0.41.0"
 min_herdr_version = "0.9.1"
 platforms = ["linux", "macos"]
 description = "Opens bdi in a split beside the focused pane: the trees of work in that pane's project, with what each agent is doing beside its bead. Part of beady-eye."
 
-# Fetches this version's released bdi into bin/, so installing needs no Rust
-# toolchain. `herdr plugin link` skips it: a linked checkout runs it by hand.
+# Builds this fork from its own checkout; requires Rust 1.88+.
+# `herdr plugin link` skips builds: run sh herdr/build.sh before linking.
 [[build]]
-command = ["sh", "herdr/fetch.sh"]
+command = ["sh", "herdr/build.sh"]
 
 # The pane starts in the focused pane's directory rather than the plugin root,
 # so bdi is named by absolute path. bdi's own error is all that says why it

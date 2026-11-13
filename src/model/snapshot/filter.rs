@@ -21,8 +21,39 @@ impl Tree {
     /// hide it for the one reason it must not: an unreadable tracker and a
     /// tracker with no work would look the same.
     fn survives(&self, filter: Filter) -> bool {
+        if self.tracker != TrackerState::Ok {
+            return true;
+        }
+        let mut visible = self.beads.iter().filter(|bead| !bead.disposable_fixture);
         match filter {
             Filter::All => true,
+            Filter::History => true,
+            Filter::CurrentWork => visible.clone().any(|bead| !bead.status.is_finished()),
+            Filter::Activity => visible.any(|bead| {
+                use crate::collect::omo::ActivityState;
+                let status_signal = matches!(
+                    bead.status,
+                    crate::model::types::Status::InProgress
+                        | crate::model::types::Status::Hooked
+                        | crate::model::types::Status::Blocked
+                );
+                let relevant_activity =
+                    |activity: &crate::collect::omo::Activity| match activity.state {
+                        ActivityState::Conflict => true,
+                        ActivityState::Working
+                        | ActivityState::Finished
+                        | ActivityState::AwaitingAcceptance
+                        | ActivityState::Failed
+                        | ActivityState::Cancelled => {
+                            activity.task_id.is_some() && !bead.status.is_closed()
+                        }
+                        ActivityState::Unknown => false,
+                    };
+                let execution_signal = bead.activity.as_ref().is_some_and(|activity| {
+                    relevant_activity(activity) || activity.workers.iter().any(relevant_activity)
+                });
+                (status_signal && !bead.status.is_closed()) || execution_signal
+            }),
             Filter::LiveAgents => {
                 self.counts.live_agents > 0
                     || self.counts.anomalies > 0
@@ -71,7 +102,7 @@ pub(super) fn partition(
     agents: ProviderState,
     filter: Filter,
 ) -> (Vec<Arc<Tree>>, Vec<HiddenTree>) {
-    let filter = if agents.answered() {
+    let filter = if agents.answered() || filter != Filter::LiveAgents {
         filter
     } else {
         Filter::All

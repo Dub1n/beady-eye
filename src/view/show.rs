@@ -564,6 +564,56 @@ pub fn said(
     if let Some(agent) = &cells.agent {
         rows.push(indented(vec![Span::styled(agent.clone(), palette::AGENT)]));
     }
+    if let Some(activity) = &node.activity {
+        rows.push(Vec::new());
+        rows.push(vec![Span::styled(
+            "EXECUTION (stored bead status unchanged)",
+            palette::TITLE,
+        )]);
+        let mut facts = vec![format!("State: {}", activity.state_label())];
+        for (label, value) in [
+            ("Model", activity.effective_model.as_deref()),
+            ("Worker", activity.worker_name.as_deref()),
+            ("Worker type", activity.worker_type.as_deref()),
+            ("Task", activity.task_id.as_deref()),
+            ("Attempt", activity.attempt_id.as_deref()),
+            ("Child session", activity.child_session.as_deref()),
+            ("Coordinator", activity.coordinator.as_deref()),
+        ] {
+            if let Some(value) = value {
+                facts.push(format!("{label}: {value}"));
+            }
+        }
+        if let Some(observed) = activity.observed_at {
+            facts.push(format!("Source observation: {}", observed.to_rfc3339()));
+        }
+        if activity.fresh == Some(false) {
+            facts.push("Source is last known / stale".into());
+        }
+        facts.extend(activity.evidence.iter().map(|e| format!("Evidence: {e}")));
+        for (index, worker) in activity.workers.iter().enumerate() {
+            facts.push(format!("Worker {}: {}", index + 1, worker.state_label()));
+            for (label, value) in [
+                ("Task", worker.task_id.as_deref()),
+                ("Name", worker.worker_name.as_deref()),
+                ("Model", worker.effective_model.as_deref()),
+                ("Session", worker.child_session.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    facts.push(format!("  {label}: {value}"));
+                }
+            }
+            facts.extend(worker.evidence.iter().map(|e| format!("  Evidence: {e}")));
+        }
+
+        for fact in facts {
+            rows.extend(
+                markdown::rows(&fact, width.saturating_sub(2).max(1))
+                    .into_iter()
+                    .map(indented),
+            );
+        }
+    }
     match &node.watching {
         Watching::Unknown => rows.push(indented(vec![Span::styled(
             phrase::watches_unknown(),
@@ -927,6 +977,8 @@ mod tests {
     /// A bead with something in every section `bd show` prints.
     fn a_bead() -> Node {
         Node {
+            activity: None,
+            disposable_fixture: false,
             project: "dunwich".to_string(),
             id: "dun-7.1".to_string(),
             title: "re-point the dish".to_string(),

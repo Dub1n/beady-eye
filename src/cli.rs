@@ -407,7 +407,7 @@ pub fn run() -> anyhow::Result<ExitCode> {
     let filter = if cli.all {
         Filter::All
     } else {
-        Filter::LiveAgents
+        Filter::CurrentWork
     };
     if cli.json {
         let mut snapshot = crate::app::run(

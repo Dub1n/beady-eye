@@ -103,13 +103,15 @@ fn walking_up_the_rows_and_joining_the_ids_gives_a_beads_whole_id_back() {
             };
             above.truncate(place.steps.len());
             let rebuilt = match above.last() {
-                Some(parent) if row.id.starts_with('.') => format!("{parent}{}", row.id),
-                _ => row.id.clone(),
+                Some(parent) if row.display_id.starts_with('.') => {
+                    format!("{parent}{}", row.display_id)
+                }
+                _ => row.display_id.clone(),
             };
 
             assert_eq!(rebuilt, place.key().id, "{:#?}", sketch(&forest));
 
-            shortened += usize::from(row.id.starts_with('.'));
+            shortened += usize::from(row.display_id.starts_with('.'));
             above.push(rebuilt);
         }
     }

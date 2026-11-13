@@ -152,7 +152,15 @@ impl ProviderState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Filter {
+    /// Upstream compatibility filter: trees with a live agent or finding.
     LiveAgents,
+    /// Trees containing unfinished work, the compact default view.
+    CurrentWork,
+    /// Work with execution or attention signals; status is the initial fallback.
+    Activity,
+    /// Every collected tree, including closed work returned by the collector.
+    History,
+    /// Every collected tree, including closed and otherwise quiet work.
     All,
 }
 
@@ -265,13 +273,29 @@ impl Counts {
         let mut counted = BTreeSet::new();
         let once: Vec<&Node> = nodes
             .into_iter()
-            .filter(|node| counted.insert(node.key()))
+            .filter(|node| !node.disposable_fixture && counted.insert(node.key()))
             .collect();
         Counts {
             total: once.len(),
             finished: once.iter().filter(|n| n.status.is_finished()).count(),
-            live_agents: once.iter().filter(|n| n.agent.is_some()).count(),
-            anomalies: once.iter().filter(|n| !n.anomalies.is_empty()).count(),
+            live_agents: once
+                .iter()
+                .filter(|n| {
+                    n.agent.is_some()
+                        || n.activity
+                            .as_ref()
+                            .is_some_and(|a| a.state == crate::collect::omo::ActivityState::Working)
+                })
+                .count(),
+            anomalies: once
+                .iter()
+                .filter(|n| {
+                    !n.anomalies.is_empty()
+                        || n.activity.as_ref().is_some_and(|a| {
+                            a.state == crate::collect::omo::ActivityState::Conflict
+                        })
+                })
+                .count(),
         }
     }
 }
@@ -284,6 +308,12 @@ impl Counts {
 /// way down.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Node {
+    /// Passive execution evidence, independent of the persistent status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<crate::collect::omo::Activity>,
+    /// Matches configured disposable-record provenance; retained for overrides.
+    #[serde(skip)]
+    pub disposable_fixture: bool,
     /// The project whose tracker holds the bead. Its own project's, which is
     /// not the tree's where the tree reached it through a bead waiting on it.
     pub project: String,
@@ -455,6 +485,8 @@ struct Drawn<'a> {
     closed_at: Option<DateTime<Utc>>,
     badges: &'a [Badged],
     agent: Option<&'a AgentRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activity: Option<&'a crate::collect::omo::Activity>,
     anomalies: &'a [Anomaly],
     orphaned_dependencies: &'a [OrphanedDependency],
 }
@@ -480,6 +512,7 @@ impl Tree {
                     closed_at: node.closed_at,
                     badges: &node.badges,
                     agent: node.agent.as_ref(),
+                    activity: node.activity.as_ref(),
                     anomalies: &node.anomalies,
                     orphaned_dependencies: &node.orphaned_dependencies,
                 }
