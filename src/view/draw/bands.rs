@@ -89,12 +89,19 @@ pub fn key_rows(area: Rect) -> u16 {
 /// a row is the whole of what a pointer names.
 pub fn line_at(forest: Rect, from: usize, lines: usize, row: u16) -> Option<usize> {
     let within = row.checked_sub(forest.y)? as usize;
-    if within >= forest.height as usize {
-        return None;
-    }
+    let (top, count, _) = viewport(from, lines, forest.height as usize);
+    let into = within.checked_sub(top)?;
+    (into < count).then(|| from + into)
+}
 
-    let at = from + within;
-    (at < lines).then_some(at)
+/// Indicator rows and content capacity. Tiny bands keep their rows for content.
+/// A bottom marker is needed only if the rows remaining after the top marker
+/// cannot hold the rest of the forest.
+pub(super) fn viewport(from: usize, lines: usize, height: usize) -> (usize, usize, usize) {
+    let top = usize::from(height >= 3 && from > 0);
+    let bottom = usize::from(height >= 3 && lines.saturating_sub(from) > height - top);
+    let count = lines.saturating_sub(from).min(height - top - bottom);
+    (top, count, bottom)
 }
 
 #[cfg(test)]
@@ -113,6 +120,98 @@ mod tests {
     /// A forest with more lines than any screen here has rows, so the tail
     /// is left only what it keeps when the forest needs the rest.
     const A_TALL_TREE: usize = 100;
+
+    #[test]
+    fn indicators_are_centred_and_never_clickable_even_on_narrow_screens() {
+        for width in [1, 2, 3, 4, 9, 60] {
+            let mut forest = opened(&snapshot(
+                vec![grove(40)],
+                Vec::new(),
+                ProviderState::Answering,
+            ));
+            let band = regions(
+                Rect::new(0, 0, width, 10),
+                forest.lines().len(),
+                TailBand::Shown,
+            )
+            .forest;
+            forest.fit(band.height as usize);
+            for motion in [Motion::FirstRow, Motion::HalfScreenDown, Motion::LastRow] {
+                forest.apply(Action::Move(motion));
+                let frame = frame_of(&forest, width, 10).rows();
+                let (top, _, bottom) =
+                    viewport(forest.from(), forest.lines().len(), band.height as usize);
+                for row in [
+                    (top > 0).then_some(0),
+                    (bottom > 0).then_some(band.height - 1),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    let shown = &frame[row as usize];
+                    assert_eq!(shown.trim(), ".".repeat(width.min(3) as usize));
+                    if width >= 3 {
+                        assert_eq!(shown.find("..."), Some(((width - 3) / 2) as usize));
+                    }
+                    assert_eq!(
+                        line_at(band, forest.from(), forest.lines().len(), row),
+                        None
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn status_reservation_uses_the_same_forest_mapping() {
+        let mut forest = opened(&snapshot(
+            vec![grove(40)],
+            Vec::new(),
+            ProviderState::Answering,
+        ));
+        for height in 0..12 {
+            let bands = crate::view::draw::regions_with_status(
+                Rect::new(0, 0, 40, height),
+                forest.lines().len(),
+                TailBand::Shown,
+                true,
+            );
+            forest.fit(bands.forest.height as usize);
+            forest.apply(Action::Move(Motion::LastRow));
+            if bands.forest.height > 0 {
+                assert!(
+                    (bands.forest.y..bands.forest.y + bands.forest.height).any(|row| {
+                        line_at(bands.forest, forest.from(), forest.lines().len(), row)
+                            == Some(forest.selected_line())
+                    })
+                );
+            }
+            assert_eq!(
+                line_at(
+                    bands.forest,
+                    forest.from(),
+                    forest.lines().len(),
+                    bands.keys.y
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn tiny_bands_keep_content_and_zero_height_maps_nothing() {
+        for height in 0..=2 {
+            let band = Rect::new(0, 4, 2, height);
+            for row in 0..8 {
+                let expected = (row >= 4 && row < 4 + height).then(|| 12 + (row - 4) as usize);
+                assert_eq!(line_at(band, 12, 100, row), expected);
+            }
+        }
+        assert_eq!(viewport(0, 5, 5), (0, 5, 0));
+        assert_eq!(viewport(0, 6, 5), (0, 4, 1));
+        assert_eq!(viewport(1, 6, 5), (1, 3, 1));
+        assert_eq!(viewport(2, 6, 5), (1, 4, 0));
+    }
 
     // ---- the bands of the screen -----------------------------------------
 
@@ -274,8 +373,10 @@ mod tests {
             let lines = forest.lines().len();
 
             for row in band.y..band.y + band.height {
-                let at =
-                    line_at(band, forest.from(), lines, row).expect("the band is full of lines");
+                let Some(at) = line_at(band, forest.from(), lines, row) else {
+                    assert_eq!(frame[row as usize].trim(), "...");
+                    continue;
+                };
                 let shown = match at {
                     0 => "summit-works".to_string(),
                     1 => "lift the ground station".to_string(),
@@ -334,8 +435,10 @@ mod tests {
     fn a_scrolled_band_names_the_lines_it_is_showing() {
         let band = Rect::new(0, 0, 60, 8);
 
-        assert_eq!(line_at(band, 12, 100, 0), Some(12));
-        assert_eq!(line_at(band, 12, 100, 7), Some(19));
+        assert_eq!(line_at(band, 12, 100, 0), None);
+        assert_eq!(line_at(band, 12, 100, 1), Some(12));
+        assert_eq!(line_at(band, 12, 100, 6), Some(17));
+        assert_eq!(line_at(band, 12, 100, 7), None);
         assert_eq!(line_at(band, 12, 100, 8), None);
     }
 }

@@ -42,6 +42,35 @@ use foot::{notices, status_bar};
 use groups::{group_line, item_line, scoped_line};
 use project::{absent_line, project_line, unread_line};
 
+/// Reserve a selected-status row immediately above the shortcuts when enabled.
+/// Tiny terminals retain the forest and keys instead of adding a width barrier.
+pub fn regions_with_status(area: Rect, lines: usize, band: TailBand, enabled: bool) -> Regions {
+    if !enabled || area.height < 3 {
+        return regions(area, lines, band);
+    }
+    let mut bands = regions(
+        Rect {
+            height: area.height - 1,
+            ..area
+        },
+        lines,
+        band,
+    );
+    bands.keys.y += 1;
+    bands
+}
+
+/// The selected bead's marker meaning; headers and summary rows have no bead state.
+pub fn selected_status(forest: &Forest) -> Option<String> {
+    match &forest.lines().get(forest.selected_line())?.content {
+        Content::Bead(row) => Some(crate::view::row::appearance::description(
+            &row.status,
+            row.activity.as_ref(),
+        )),
+        _ => None,
+    }
+}
+
 /// What every project line's freshness is drawn from: when each project was
 /// last read, which projects have a read outstanding, which have lapsed, and
 /// the instant this frame is being drawn at.
@@ -145,7 +174,24 @@ pub fn draw(
     let widths = lines.widths();
     let reads = Reads::new(&forest.snapshot().read_at, collecting, lapsed, now);
 
-    for (row, (at, line)) in lines.viewport(forest.from(), height).enumerate() {
+    let (top, count, bottom) = bands::viewport(forest.from(), lines.len(), height);
+    for row in [
+        (top > 0).then_some(0),
+        (bottom > 0).then_some(height.saturating_sub(1)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        frame.render_widget(
+            ratatui::text::Line::from("...").centered(),
+            Rect {
+                y: bands.forest.y + row as u16,
+                height: 1,
+                ..bands.forest
+            },
+        );
+    }
+    for (row, (at, line)) in lines.viewport(forest.from(), count).enumerate() {
         let drawn = fitted(line, widths, layout, &reads);
         let drawn = if at == selected {
             drawn.selected()
@@ -155,7 +201,7 @@ pub fn draw(
         frame.render_widget(
             drawn,
             Rect {
-                y: bands.forest.y + row as u16,
+                y: bands.forest.y + (top + row) as u16,
                 height: 1,
                 ..bands.forest
             },

@@ -35,6 +35,30 @@ pub fn marker(status: &Status, activity: Option<&Activity>) -> &'static str {
     }
 }
 
+/// Meaning of the selected row's displayed marker, independent of priority.
+pub fn description(status: &Status, activity: Option<&Activity>) -> String {
+    if let Status::Other(name) = status {
+        return format!("[?]: unknown status ({name})");
+    }
+    let marker = marker(status, activity);
+    let meaning = match marker {
+        "[ ]" => "to-do",
+        "[~]" => "in progress",
+        "[<]" => "hooked / prepared",
+        "[?]" => "blocked or needs information",
+        "[T]" => "finished; review or validation pending",
+        "[A]" => "awaiting acceptance",
+        "[F]" => "execution failed",
+        "[-]" => "execution cancelled",
+        "[x]" => "closed",
+        "[!]" => "conflicting evidence; needs attention",
+        "[S]" => "deferred",
+        "[P]" => "pinned",
+        _ => "unknown status",
+    };
+    format!("{marker}: {meaning}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +152,75 @@ mod tests {
     }
 
     #[test]
+    fn selected_status_explains_the_displayed_marker_without_claiming_verification() {
+        assert_eq!(description(&Status::InProgress, None), "[~]: in progress");
+        assert_eq!(description(&Status::Closed, None), "[x]: closed");
+        assert_eq!(
+            description(&Status::Blocked, None),
+            "[?]: blocked or needs information"
+        );
+        assert_eq!(
+            description(&Status::Other("new-state".into()), None),
+            "[?]: unknown status (new-state)"
+        );
+        for (state, expected) in [
+            (
+                ActivityState::Finished,
+                "[T]: finished; review or validation pending",
+            ),
+            (
+                ActivityState::AwaitingAcceptance,
+                "[A]: awaiting acceptance",
+            ),
+            (
+                ActivityState::Conflict,
+                "[!]: conflicting evidence; needs attention",
+            ),
+        ] {
+            let activity = Activity {
+                state,
+                project: String::new(),
+                bead_id: String::new(),
+                attempt_id: None,
+                task_id: None,
+                worker_name: None,
+                worker_type: None,
+                effective_model: None,
+                child_session: None,
+                coordinator: None,
+                observed_at: None,
+                fresh: None,
+                acceptance_ready: false,
+                evidence: vec![],
+                workers: vec![],
+            };
+            assert_eq!(description(&Status::InProgress, Some(&activity)), expected);
+            assert_eq!(description(&Status::Closed, Some(&activity)), "[x]: closed");
+        }
+    }
+
+    #[test]
+    fn compact_fold_markers_keep_the_branch_and_column_alignment() {
+        for ascii in [false, true] {
+            for indent in [1, 2, 3, 4] {
+                for last in [false, true] {
+                    let open = lines::prefix_with(&[true], last, false, None, indent, ascii);
+                    let shut = lines::prefix_with(&[true], last, true, None, indent, ascii);
+                    assert_eq!(open.chars().count(), shut.chars().count());
+                    let branch = if ascii {
+                        '+'
+                    } else if last {
+                        '└'
+                    } else {
+                        '├'
+                    };
+                    assert!(shut.contains(branch), "{shut:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compact_rows_fit_narrow_widths_and_deep_tree_prefixes() {
         for width in [30, 40, 60, 80] {
             let row = Fitted::new(
@@ -138,7 +231,7 @@ mod tests {
                 vec![Span::raw("title 東京 🧵 remains visible")],
                 vec![Span::raw("optional state that yields first")],
             )
-            .compact_tree();
+            .compact_tree(2);
             let mut buffer = Buffer::empty(Rect::new(0, 0, width, 1));
             row.render(Rect::new(0, 0, width, 1), &mut buffer);
             let line: String = (0..width).map(|x| buffer[(x, 0)].symbol()).collect();

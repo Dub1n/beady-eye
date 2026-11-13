@@ -58,6 +58,18 @@ old closed roots reachable. Completed toggling changes rows within scope rather
 than replacing focus with the entire archive. Explicit focus, folds and selection
 survive source refreshes; Home recomputes the default scope.
 
+The row above the shortcuts explains the selected bead's marker (for example,
+`[~]: in progress`). Project and summary selections have no bead status. The
+extra row is omitted on terminals shorter than three rows so the tree remains
+usable. When tree content extends beyond the viewport, centred `...` rows mark
+hidden content above and below. They are scroll indicators, not selectable beads;
+viewports shorter than three rows keep their space for content instead.
+
+Compact fold arrows retain their branch connectors. Indentation is clipped only
+when needed for title space and only in complete configured steps, so expanded
+and collapsed rows keep the same columns. A one-cell indent retains the branch
+connector and leaves folding to Space rather than dropping the branch for an arrow.
+
 ## Markers are not database statuses
 
 | Marker | Meaning |

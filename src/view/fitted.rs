@@ -157,6 +157,7 @@ pub struct Fitted {
     title_or_nothing: bool,
     state_or_nothing: bool,
     compact_tree: bool,
+    tree_indent: usize,
 }
 
 impl Fitted {
@@ -176,6 +177,7 @@ impl Fitted {
             title_or_nothing: false,
             state_or_nothing: false,
             compact_tree: false,
+            tree_indent: 2,
         }
     }
 
@@ -257,7 +259,8 @@ impl Fitted {
     /// Reserve title space on compact tree rows by left-cropping deep
     /// connector prefixes and limiting optional state cells.
     #[must_use]
-    pub(crate) fn compact_tree(mut self) -> Self {
+    pub(crate) fn compact_tree(mut self, indent: u8) -> Self {
+        self.tree_indent = usize::from(indent.max(1));
         self.compact_tree = true;
         self
     }
@@ -290,7 +293,7 @@ impl Widget for Fitted {
         let shorter = self.shorter;
         let identity = shortened(self.identity, &shorter, Block::Identity, width);
         let identity = if self.compact_tree {
-            compact_identity(identity, width)
+            compact_identity(identity, width, self.tree_indent)
         } else {
             identity
         };
@@ -500,18 +503,25 @@ pub(crate) fn columns(spans: &[Span<'static>]) -> usize {
 
 /// Keep the bead marker and nearest connector while limiting how much a deep
 /// ancestor chain can take from its title.
-fn compact_identity(mut spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+fn compact_identity(
+    mut spans: Vec<Span<'static>>,
+    width: usize,
+    indent: usize,
+) -> Vec<Span<'static>> {
     if spans.len() < 2 {
         return spans;
     }
-    let limit = (width / 2).min(12);
+    let limit = width / 2;
     if columns(&spans) <= limit {
         return spans;
     }
     let rest = columns(&spans[1..]);
     let prefix_room = limit.saturating_sub(rest);
     let prefix = &spans[0];
-    spans[0] = Span::styled(tail_of(&prefix.content, prefix_room), prefix.style);
+    let original = columns(std::slice::from_ref(prefix));
+    let dropped = original.saturating_sub(prefix_room).div_ceil(indent) * indent;
+    let kept = original.saturating_sub(dropped);
+    spans[0] = Span::styled(tail_of(&prefix.content, kept), prefix.style);
     spans
 }
 
@@ -1364,6 +1374,24 @@ mod tests {
     /// The words of a rendered row, with any link's escape bytes taken out.
     fn drawn_of(buf: &Buffer) -> String {
         Painted::read(buf).rows().remove(0)
+    }
+
+    #[test]
+    fn compact_prefix_keeps_available_width_and_crops_whole_tree_levels() {
+        let prefix = format!("  {}├ ", "│ ".repeat(16));
+        let spans = vec![Span::raw(prefix.clone()), Span::raw("[~]")];
+        assert_eq!(compact_identity(spans.clone(), 120, 2), spans);
+        for width in [30, 40, 60] {
+            let fitted = compact_identity(spans.clone(), width, 2);
+            let original = prefix.chars().count();
+            let kept = fitted[0].content.chars().count();
+            assert_eq!((original - kept) % 2, 0, "width {width}");
+            assert!(fitted[0].content.ends_with("├ "));
+            assert!(
+                !fitted[0].content.starts_with(' '),
+                "no half-level at {width}"
+            );
+        }
     }
 
     /// Where the row's one hyperlink starts.

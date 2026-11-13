@@ -237,13 +237,26 @@ impl Forest {
     /// its end. The renderer is the only thing that knows the band's height,
     /// so it says.
     pub fn fit(&mut self, room: usize) {
+        let was_visible =
+            self.selected >= self.from && self.selected < self.from.saturating_add(self.room);
+        let resized = self.room != room;
         self.room = room;
         self.from = self.from.min(self.furthest());
+        if resized && was_visible {
+            self.reveal();
+        }
     }
 
     /// The furthest the viewport can be scrolled and still be full.
     fn furthest(&self) -> usize {
-        self.lines.len().saturating_sub(self.room)
+        if self.lines.len() <= self.room {
+            0
+        } else {
+            // At the end only the top indicator takes a row.
+            self.lines
+                .len()
+                .saturating_sub(self.room.saturating_sub(usize::from(self.room >= 3)))
+        }
     }
 
     /// How far a half-screen motion moves: half the band the trees are in,
@@ -283,8 +296,24 @@ impl Forest {
         let was = self.from;
         if self.selected < self.from {
             self.from = self.selected;
-        } else if self.room > 0 && self.selected >= self.from + self.room {
-            self.from = self.selected + 1 - self.room;
+        }
+        if self.room > 0 {
+            let top = usize::from(self.room >= 3 && self.from > 0);
+            let bottom = usize::from(
+                self.room >= 3 && self.lines.len().saturating_sub(self.from) > self.room - top,
+            );
+            let count = self.room - top - bottom;
+            if self.selected >= self.from.saturating_add(count) {
+                // A selection at the end needs no bottom indicator. Elsewhere
+                // reserve both markers when moving away from the first row.
+                let bottom = usize::from(
+                    self.room >= 3 && self.selected < self.lines.len().saturating_sub(1),
+                );
+                let count = self.room - usize::from(self.room >= 3) - bottom;
+                self.from = (self.selected + 1)
+                    .saturating_sub(count)
+                    .min(self.furthest());
+            }
         }
         self.from != was
     }

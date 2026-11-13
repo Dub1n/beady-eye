@@ -89,7 +89,7 @@ pub(super) fn bead_line(row: &Row, prefix: &str, widths: &Widths, layout: &Layou
         .linking(links)
         .shortening(shorter);
     if layout.compact {
-        fitted = fitted.compact_tree();
+        fitted = fitted.compact_tree(layout.indent);
     }
     if layout.state.contains(&Cell::Agent) {
         if let Some(briefly) = &row.agent_briefly {

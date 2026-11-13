@@ -267,38 +267,50 @@ fn right_left_and_space_control_scope_selection_and_folding() {
 #[test]
 fn the_motions_walk_the_opened_forest_and_scroll_the_view_after_it() {
     let mut shown = over_every_fold_kind();
+    let expect = |shown: &mut Shown, body: &[&str], top: bool, bottom: bool| {
+        let drawn = forest(shown, &SHORT);
+        let mut wanted: Vec<String> = body.iter().map(|row| row.to_string()).collect();
+        let marker = format!("{}...", " ".repeat((COLS as usize - 3) / 2));
+        if top {
+            wanted.insert(0, marker.clone());
+        }
+        if bottom {
+            wanted.push(marker);
+        }
+        assert_eq!(drawn, wanted);
+    };
 
     press(&mut shown, EXPAND_THE_FOREST);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[..7]);
+    expect(&mut shown, &EVERYTHING_OPEN[..6], false, true);
 
     press(&mut shown, DOWN);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[..7]);
+    expect(&mut shown, &EVERYTHING_OPEN[..6], false, true);
     assert_eq!(selected(&shown), "ark-1");
 
     press(&mut shown, LAST_ROW);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[10..]);
+    expect(&mut shown, &EVERYTHING_OPEN[11..], true, false);
     assert_eq!(selected(&shown), "ark-2.1");
 
     press(&mut shown, UP);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[10..]);
+    expect(&mut shown, &EVERYTHING_OPEN[11..], true, false);
     assert_eq!(selected(&shown), "ark-2");
 
     half_screen_up(&mut shown);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[10..]);
+    expect(&mut shown, &EVERYTHING_OPEN[11..], true, false);
     assert_eq!(selected(&shown), "ark-1.5");
 
     half_screen_up(&mut shown);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[9..16]);
+    expect(&mut shown, &EVERYTHING_OPEN[9..14], true, true);
     assert_eq!(selected(&shown), "ark-1.1.1");
 
     half_screen_down(&mut shown);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[9..16]);
+    expect(&mut shown, &EVERYTHING_OPEN[9..14], true, true);
     assert_eq!(selected(&shown), "ark-1.5");
 
     // The first row is the project's, and a project has no bead to name it,
     // so the row below says where `g` went.
     press(&mut shown, FIRST_ROW);
-    assert_eq!(forest(&mut shown, &SHORT), &EVERYTHING_OPEN[..7]);
+    expect(&mut shown, &EVERYTHING_OPEN[..6], false, true);
     press(&mut shown, DOWN);
     assert_eq!(selected(&shown), "ark-1");
 }
