@@ -42,7 +42,7 @@ fn a_notch_moves_the_view_as_far_as_it_is_told() {
 fn the_wheel_stops_at_either_end_of_the_forest() {
     let mut forest = flatten(snapshot());
     forest.fit(4);
-    let furthest = forest.lines().len() - 4;
+    let furthest = forest.lines().len() - 3;
 
     for _ in 0..40 {
         forest.scrolled(Notch::Down, A_NOTCH);
@@ -102,7 +102,7 @@ fn a_motion_reveals_the_selection_by_the_least_it_can() {
             if from > 0 {
                 assert_eq!(
                     from,
-                    at + 1 - room,
+                    (at + 1 - (room - 2)).min(forest.lines().len() - (room - 1)),
                     "the band travelled further down than the row leaving it asked for"
                 );
                 scrolled = true;
@@ -302,4 +302,28 @@ fn focus_refresh_and_quit_change_nothing_in_the_forest() {
     }
 
     assert_eq!(sketch(&forest), before);
+}
+
+#[test]
+fn selection_stays_on_content_through_tiny_bands_and_resizes() {
+    for room in 1..=8 {
+        let mut forest = flatten(snapshot());
+        forest.fit(room);
+        for motion in [Motion::LastRow, Motion::FirstRow, Motion::HalfScreenDown] {
+            forest.apply(Action::Move(motion));
+            for height in [room, 1, 3, 8] {
+                forest.fit(height);
+                let band = ratatui::layout::Rect::new(0, 4, 10, height as u16);
+                assert!(
+                    (band.y..band.y + band.height).any(|row| {
+                        crate::view::draw::line_at(band, forest.from(), forest.lines().len(), row)
+                            == Some(forest.selected_line())
+                    }),
+                    "{motion:?}, height {height}, from {}, selected {}",
+                    forest.from(),
+                    forest.selected_line()
+                );
+            }
+        }
+    }
 }

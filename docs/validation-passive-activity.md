@@ -76,3 +76,29 @@ Native task formats and project metadata conventions can change. Unsupported
 records degrade to explicit uncertainty; the viewer does not recover, dispatch,
 accept, cancel or close work. A recorded closed marker and a completed worker
 record are not real-backend validation evidence.
+
+## 0.41.1 tree and viewport follow-up
+
+A reported layout defect came from clipping deep prefixes at a fixed character
+limit: this could drop half an indentation step even in a wide pane. Prefixes
+now use available width and are shortened only by complete configured levels.
+Compact collapsed branches retain their connector as well as the fold arrow;
+a one-cell indent retains the branch without an arrow.
+
+The selected marker's description has a reserved row above the shortcuts,
+including with the preview hidden. A selected project/summary has no bead status.
+The real-terminal test checks the description at 30/40/60/80 columns, alongside
+full-ID details and copying.
+
+Centred literal `...` rows indicate tree content above/below the viewport. Tests
+cover beginning/middle/end positions, non-clickable indicators, scroll bounds,
+selection visibility and tiny viewports. Indicators are omitted below three tree
+rows; the status row is omitted below three terminal rows. A details window no
+longer refits the covered forest during resizing, preserving the return position.
+
+Follow-up validation: the full Cargo suite passed 2,760 tests with zero failures
+and three ignored. Both Clippy modes passed with warnings denied, as did
+formatting, diff checks, the extracted source scans and the release build.
+The rebuilt `bin/bdi` reports 0.41.1 and matches the canonical release binary.
+The new UI behaviour was exercised through the real PTY/application tests;
+this follow-up does not claim a fresh live Herdr-pane check.

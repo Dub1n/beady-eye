@@ -603,8 +603,8 @@ fn a_notch_moves_the_forest_three_lines() {
     let now = the_one_row(&after, A_ROOT_THE_NOTCH_KEEPS_ON_SCREEN);
 
     assert_eq!(
-        was.checked_sub(now),
+        was.checked_sub(now).map(|distance| distance + 1),
         Some(THREE_LINES),
-        "one notch moved the view from row {was} to row {now}: {after:#?}"
+        "the new top indicator offsets one of the three scrolled lines ({was} to {now}): {after:#?}"
     );
 }

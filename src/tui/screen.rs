@@ -576,7 +576,12 @@ impl Shown {
     /// than left on the last frame's, so a pointer is answered for the screen
     /// it pointed at whatever has been drawn since.
     fn clicked(&mut self, screen: Rect, row: u16) -> bool {
-        let bands = draw::regions(screen, self.forest.lines().len(), self.tail_band);
+        let bands = draw::regions_with_status(
+            screen,
+            self.forest.lines().len(),
+            self.tail_band,
+            self.drawing.layout.compact,
+        );
         self.forest.fit(bands.forest.height as usize);
 
         match draw::line_at(
@@ -1109,10 +1114,31 @@ fn paint(
     lapsed: &[String],
     now: DateTime<Utc>,
 ) -> u16 {
-    let bands = draw::regions(frame.area(), forest.lines().len(), tail_band);
-    forest.fit(bands.forest.height as usize);
+    let bands = draw::regions_with_status(
+        frame.area(),
+        forest.lines().len(),
+        tail_band,
+        layout.compact,
+    );
+    // A bead window covers the forest; resizing that window must not move
+    // the viewport the reader will return to.
+    if !matches!(&over, Over::Bead(_)) {
+        forest.fit(bands.forest.height as usize);
+    }
     draw::draw(frame, bands, forest, layout, collecting, lapsed, now, foot);
     draw::draw_tail(frame, bands.tail, tail);
+    if layout.compact && frame.area().height >= 3 {
+        if let Some(status) = draw::selected_status(forest) {
+            frame.render_widget(
+                ratatui::text::Line::raw(status),
+                Rect {
+                    y: bands.keys.y - 1,
+                    height: 1,
+                    ..bands.keys
+                },
+            );
+        }
+    }
     match over {
         Over::Nothing => {}
         Over::Bindings => key_bindings(frame, frame.area(), &bindings()),
@@ -3107,12 +3133,15 @@ mod tests {
             "the grove has to outgrow the band for the scroll to be the \
              difference between the two clicks"
         );
-        assert!(shown.clicked(screen, band.y));
+        assert!(
+            !shown.clicked(screen, band.y),
+            "the top indicator is not a bead"
+        );
+        assert!(shown.clicked(screen, band.y + 1));
         assert_eq!(
             shown.forest.selected_line(),
-            last + 1 - band.height as usize,
-            "the last line is on the band's last row, so its first row holds \
-             the line a bandful before it"
+            last + 2 - band.height as usize,
+            "the first content row follows the top indicator"
         );
     }
 
@@ -3136,7 +3165,9 @@ mod tests {
             "the wheel moved the selection"
         );
         let drawn = forest_band(&mut shown, 60, 24);
-        assert!(shown.clicked(screen, band.y));
+        assert_eq!(drawn[0].trim(), "...");
+        assert!(!shown.clicked(screen, band.y));
+        assert!(shown.clicked(screen, band.y + 1));
 
         let selected = shown.forest.selected_line();
         assert_ne!(
@@ -3146,9 +3177,9 @@ mod tests {
         let id = &cursor(&shown).expect("the click landed on a bead").id;
         let as_drawn = format!("{} ", id.trim_start_matches("grv-1"));
         assert!(
-            drawn[0].contains(&as_drawn),
-            "the click selected {id}, and the top row drew {:?}",
-            drawn[0]
+            drawn[1].contains(&as_drawn),
+            "the click selected {id}, and the first content row drew {:?}",
+            drawn[1]
         );
     }
 
@@ -3627,10 +3658,11 @@ mod tests {
         let hidden = shown_screen(&mut shown, 60, 24);
 
         assert_eq!(rule(&hidden), None, "no band, so no rule: {hidden:#?}");
+        assert_eq!(hidden[22].trim(), "...");
         assert_eq!(
             last_bead(&hidden),
-            22,
-            "the forest runs down to the row above the keys: {hidden:#?}"
+            21,
+            "the bottom indicator occupies the row above the keys: {hidden:#?}"
         );
 
         assert!(press(&mut shown, KeyCode::Char('t')));
@@ -4844,8 +4876,8 @@ mod tests {
             "the pane's newest line sits on the band's last row: {rows:?}"
         );
         assert!(
-            rows[bands.tail.y as usize - 1].contains("a bead in the grove"),
-            "the row above the tail is still the forest's"
+            rows[bands.tail.y as usize - 1].trim() == "...",
+            "the bottom indicator occupies the last forest row"
         );
         assert!(rows[bands.keys.y as usize].contains("q quit"));
     }

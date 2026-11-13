@@ -440,8 +440,10 @@ fn elbow(
             drawn.push(end);
             drawn.push(' ');
         } else {
-            drawn.push(end);
-            drawn.push_str(&" ".repeat(indent.saturating_sub(1)));
+            drawn.push(if last { corner } else { branch });
+            if indent >= 2 {
+                drawn.push(end);
+            }
         }
     } else {
         drawn.push(if last { corner } else { branch });
