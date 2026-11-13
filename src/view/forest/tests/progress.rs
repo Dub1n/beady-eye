@@ -263,8 +263,8 @@ fn the_widths_measure_the_lines_a_counted_subtree_has_not_drawn() {
 /// thousands of lines and a keystroke that made one did not answer at
 /// once.
 ///
-/// `h` and `l` stepping out of and into a node move only the selection
-/// too. A fold is the control: it changes what is drawn and draws once.
+/// Left below the highest bead also moves only selection. Right changes
+/// scope and is covered separately. A fold changes the rows and draws once.
 #[test]
 fn a_key_that_moves_only_the_selection_draws_nothing() {
     let mut forest = flatten(built(Filter::All));
@@ -274,8 +274,7 @@ fn a_key_that_moves_only_the_selection_draws_nothing() {
     forest.apply(Action::Move(Motion::HalfScreenDown));
     forest.apply(Action::Move(Motion::LastRow));
     forest.apply(Action::Move(Motion::FirstRow));
-    // A leaf has no fold for `h` to shut, so it steps out to the parent,
-    // which is open because the leaf is drawn, so `l` steps back in.
+    // Left from a leaf selects its displayed parent without changing folds.
     let leaf = forest
         .lines()
         .iter()
@@ -283,7 +282,6 @@ fn a_key_that_moves_only_the_selection_draws_nothing() {
         .expect("the fixture draws a leaf");
     forest.select_line(leaf);
     forest.apply(Action::CollapseOrParent);
-    forest.apply(Action::ExpandOrChild);
     assert_eq!(layout::draws_so_far() - before, 0);
 
     forest.apply(Action::ToggleFold);
@@ -319,6 +317,12 @@ fn every_key_reports_exactly_what_it_changed() {
         for shut_by_hand in [false, true] {
             let mut forest = flatten(built(Filter::All));
             forest.fit(4);
+            if key == Action::CollapseOrParent {
+                open(
+                    &mut forest,
+                    &crate::view::forest::tests::key("dunwich", "dun-7.1"),
+                );
+            }
             if shut_by_hand {
                 forest.apply(Action::CollapseSubtree);
             }

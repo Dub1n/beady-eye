@@ -1,9 +1,10 @@
 # Intended changes: compact trees and passive agent activity
 
-Status: agreed design, not implemented. This document specifies the intended
-fork behaviour. It does not claim that current upstream or fork binaries
-provide it. Existing upstream documentation describes the current implementation
-until the corresponding changes are made and reconciled.
+Status: implemented in this fork. This document remains the agreed design and
+acceptance checklist. See [the fork guide](docs/passive-activity.md) for actual
+configuration and controls, and [the validation report](docs/validation-passive-activity.md)
+for tested coverage and platform/source limits. Upstream screenshots and optional
+write integrations do not describe this fork's default passive viewing path.
 
 ## Purpose and boundaries
 

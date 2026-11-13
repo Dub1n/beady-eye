@@ -159,6 +159,10 @@ fn placed(pane: Pane) -> Pane {
 /// argument.
 #[derive(Default)]
 pub struct Collection {
+    /// Keep native readers and last successful evidence across snapshots.
+    activity_readers: std::sync::Mutex<
+        BTreeMap<String, (crate::collect::omo::OmoConfig, crate::collect::omo::Reader)>,
+    >,
     read: BTreeMap<String, Read>,
     /// Which panes each session last answered with. A session that answers
     /// replaces its own entry and no other's, and one the provider has
@@ -814,11 +818,70 @@ impl Collection {
                 )
             })
             .collect();
+        // Runtime execution may change without a tracker mutation. Collect once
+        // for each configured project on every snapshot, including unchanged
+        // tracker fingerprints, never once per rendered copy of a bead.
+        let mut activities = BTreeMap::new();
+        let mut readers = self
+            .activity_readers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        readers.retain(|project, _| cfg.omo.contains_key(project));
+        for (project, work) in &answered {
+            if let Some(config) = cfg.omo.get(*project) {
+                let inputs: Vec<_> = work
+                    .beads
+                    .iter()
+                    .map(|bead| crate::collect::omo::BeadInput::from_bead(*project, bead))
+                    .collect();
+                let entry = readers.entry(project.to_string()).or_insert_with(|| {
+                    (
+                        config.clone(),
+                        crate::collect::omo::Reader::new(config.clone()),
+                    )
+                });
+                if &entry.0 != config {
+                    *entry = (
+                        config.clone(),
+                        crate::collect::omo::Reader::new(config.clone()),
+                    );
+                }
+                let batch = entry.1.collect(&inputs);
+                activities.extend(batch.activities);
+            }
+        }
+        drop(readers);
         let trees = focused
             .iter()
             .map(|(project, root, read)| match read {
                 Ok(assembled) => {
-                    snapshot::build_tree(project, assembled, joined, &said, agents.state, cfg, now)
+                    let mut tree = snapshot::build_tree(
+                        project,
+                        assembled,
+                        joined,
+                        &said,
+                        agents.state,
+                        cfg,
+                        now,
+                    );
+                    for bead in &mut tree.beads {
+                        bead.activity = activities
+                            .get(&(bead.project.clone(), bead.id.clone()))
+                            .cloned();
+                        // Native workers intentionally need no separate pane.
+                        // Preserve concrete join conflicts, but a missing pane
+                        // alone is not an orphan claim in this integration.
+                        if cfg.omo.contains_key(&bead.project) {
+                            bead.anomalies.retain(|anomaly| {
+                                !matches!(
+                                    anomaly,
+                                    crate::model::anomaly::Anomaly::OrphanClaim { refused: None }
+                                )
+                            });
+                        }
+                    }
+                    tree.counts = crate::model::snapshot::Counts::over(&tree.beads);
+                    tree
                 }
                 Err(why) => Tree::unread(project, root, TrackerState::from((*why).clone())),
             })

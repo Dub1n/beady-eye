@@ -170,7 +170,7 @@ impl Armed {
     /// Taking it disarms: what arms this again is the read that comes back,
     /// so an ask nobody answers is an ask never repeated.
     pub(super) fn asks(&mut self, now: DateTime<Utc>) -> Option<Wanted> {
-        if !self.at.is_some_and(|at| at <= now) {
+        if self.at.is_none_or(|at| at > now) {
             return None;
         }
         self.at = None;

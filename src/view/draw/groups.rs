@@ -138,6 +138,7 @@ mod tests {
     use crate::model::snapshot::{FailedProject, Filter, ProviderState, TrackerFailure};
     use crate::view::draw::tests::*;
     use crate::view::forest::flatten;
+    use crate::view::row::Layout;
 
     /// Every kind of group there is, whichever side of the trees it is drawn
     /// on: a group's line says the same thing wherever it hangs.
@@ -296,7 +297,9 @@ path = "/tmp/bdi-ground/dunwich"
             Filter::All,
             Utc.with_ymd_and_hms(2026, 8, 30, 10, 22, 14).unwrap(),
         );
-        frame_of(&flatten(snapshot), 120, 24).rows()
+        let mut forest = flatten(snapshot);
+        forest.laid_out_to(Layout::legacy());
+        frame_of(&forest, 120, 24).rows()
     }
 
     fn row_naming(frame: &[String], pane: &str) -> String {

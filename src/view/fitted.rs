@@ -156,6 +156,7 @@ pub struct Fitted {
     whole: Style,
     title_or_nothing: bool,
     state_or_nothing: bool,
+    compact_tree: bool,
 }
 
 impl Fitted {
@@ -174,6 +175,7 @@ impl Fitted {
             whole: Style::new(),
             title_or_nothing: false,
             state_or_nothing: false,
+            compact_tree: false,
         }
     }
 
@@ -252,6 +254,14 @@ impl Fitted {
         self
     }
 
+    /// Reserve title space on compact tree rows by left-cropping deep
+    /// connector prefixes and limiting optional state cells.
+    #[must_use]
+    pub(crate) fn compact_tree(mut self) -> Self {
+        self.compact_tree = true;
+        self
+    }
+
     /// The row under the cursor, drawn so the eye finds it without reading it.
     #[must_use]
     pub fn selected(mut self) -> Self {
@@ -279,6 +289,11 @@ impl Widget for Fitted {
         let links = self.links;
         let shorter = self.shorter;
         let identity = shortened(self.identity, &shorter, Block::Identity, width);
+        let identity = if self.compact_tree {
+            compact_identity(identity, width)
+        } else {
+            identity
+        };
         let (spans, linked) = if columns(&identity) >= width {
             let (identity, drawn) = cut_to(identity, width);
             let linked = surviving(&links, Block::Identity, &identity, drawn, 0);
@@ -293,7 +308,11 @@ impl Widget for Fitted {
             };
             let ((title, title_drawn), (state, state_linked)) = match self.briefly {
                 None => {
-                    let limit = room.saturating_sub(GAP);
+                    let limit = if self.compact_tree {
+                        room.saturating_sub(GAP * 2 + (width / 2).min(12))
+                    } else {
+                        room.saturating_sub(GAP)
+                    };
                     let (state, state_drawn) = fit(
                         shortened(self.state, &shorter, Block::State, limit),
                         limit,
@@ -319,7 +338,11 @@ impl Widget for Fitted {
                     let shortest = shortened(self.state.clone(), &shorter, Block::State, 0);
                     let briefest =
                         shortened(briefly.spans.clone(), &briefly.shorter, Block::State, 0);
-                    let room_for_state = columns(&briefest).min(columns(&shortest)) + GAP;
+                    let mut room_for_state = columns(&briefest).min(columns(&shortest)) + GAP;
+                    if self.compact_tree {
+                        room_for_state =
+                            room_for_state.min(room.saturating_sub(GAP * 2 + (width / 2).min(12)));
+                    }
                     let limit = room.saturating_sub(GAP + room_for_state);
                     let (title, title_drawn) = fit(
                         shortened(self.title, &shorter, Block::Title, limit),
@@ -473,6 +496,39 @@ pub(crate) fn cover(frame: &mut Frame, window: Rect) {
 /// in bytes would put a cut inside one.
 pub(crate) fn columns(spans: &[Span<'static>]) -> usize {
     spans.iter().map(Span::width).sum()
+}
+
+/// Keep the bead marker and nearest connector while limiting how much a deep
+/// ancestor chain can take from its title.
+fn compact_identity(mut spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    if spans.len() < 2 {
+        return spans;
+    }
+    let limit = (width / 2).min(12);
+    if columns(&spans) <= limit {
+        return spans;
+    }
+    let rest = columns(&spans[1..]);
+    let prefix_room = limit.saturating_sub(rest);
+    let prefix = &spans[0];
+    spans[0] = Span::styled(tail_of(&prefix.content, prefix_room), prefix.style);
+    spans
+}
+
+/// The rightmost `limit` display columns of a prefix, without splitting a
+/// wide character. Connector strings contain single-column glyphs today.
+fn tail_of(text: &str, limit: usize) -> String {
+    let mut tail = String::new();
+    let mut used = 0;
+    for glyph in text.chars().rev() {
+        let width = Span::raw(String::from(glyph)).width();
+        if used + width > limit {
+            break;
+        }
+        used += width;
+        tail.push(glyph);
+    }
+    tail.chars().rev().collect()
 }
 
 /// `spans` fitted into `limit` columns: cut with the cut marked, or, for a

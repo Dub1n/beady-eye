@@ -88,6 +88,9 @@ pub(super) fn bead_line(row: &Row, prefix: &str, widths: &Widths, layout: &Layou
     let mut fitted = Fitted::new(identity.spans, title.spans, state.spans)
         .linking(links)
         .shortening(shorter);
+    if layout.compact {
+        fitted = fitted.compact_tree();
+    }
     if layout.state.contains(&Cell::Agent) {
         if let Some(briefly) = &row.agent_briefly {
             let short = walk.block(Block::State, Vec::new(), Some(briefly));
@@ -108,6 +111,8 @@ pub(crate) fn identity_widths(row: &Row, layout: &Layout) -> Widths {
     layout
         .identity
         .iter()
+        .filter(|cell| !matches!(cell, Cell::Id) || layout.show_ids)
+        .chain((layout.show_ids && !layout.identity.contains(&Cell::Id)).then_some(&Cell::Id))
         .map(|cell| (cell.clone(), walk.width(cell)))
         .collect()
 }
@@ -147,6 +152,12 @@ impl Walk<'_> {
                 self.cell(&mut walked, cell, agent);
             }
         }
+        if block == Block::Identity
+            && self.layout.show_ids
+            && !self.layout.identity.contains(&Cell::Id)
+        {
+            self.padded(&mut walked, &Cell::Id, agent);
+        }
         if block == Block::State {
             self.trailing(&mut walked.spans);
         }
@@ -185,16 +196,28 @@ impl Walk<'_> {
         match cell {
             Cell::Glyph => {
                 walked.cell(Span::styled(
-                    row.glyph.to_string(),
+                    if self.layout.compact || self.layout.ascii {
+                        row::appearance::marker(&row.status, row.activity.as_ref()).to_string()
+                    } else {
+                        row.glyph.to_string()
+                    },
                     status_style(&row.status),
                 ));
             }
             Cell::Id => {
+                if !self.layout.show_ids {
+                    return;
+                }
                 let style = match row.status {
                     Status::Open => colour_style(self.layout.open_id, &row.status),
                     _ => status_style(&row.status),
                 };
-                walked.cell(Span::styled(row.id.clone(), style));
+                let id = if self.layout.compact {
+                    &row.id
+                } else {
+                    &row.display_id
+                };
+                walked.cell(Span::styled(id.clone(), style));
             }
             Cell::Title => {
                 walked.cell(Span::raw(row.title.clone()));
@@ -219,26 +242,48 @@ impl Walk<'_> {
                 }
             }
             Cell::Agent => {
-                if let Some(agent) = agent {
-                    let at = walked.cell(Span::styled(agent.to_string(), palette::AGENT));
+                let label = row.activity_model.as_deref().or(agent);
+                if let Some(label) = label {
+                    let label = if self.layout.ascii {
+                        label.replace('◍', "@").to_string()
+                    } else {
+                        label.to_string()
+                    };
+                    let at = walked.cell(Span::styled(label, palette::AGENT));
                     // In the state the short form is the whole block's
                     // `briefly`; anywhere else it is this span's own.
-                    if walked.block != Block::State {
+                    if row.activity_model.is_none() && walked.block != Block::State {
                         if let Some(said) = &row.agent_briefly {
                             walked.shorter.push(Shorter {
                                 block: walked.block,
                                 at,
-                                said: said.clone(),
+                                said: if self.layout.ascii {
+                                    said.replace('◍', "@")
+                                } else {
+                                    said.clone()
+                                },
                             });
                         }
                     }
                 }
+                if self.layout.compact && row.activity_state.as_deref() == Some("Activity unknown")
+                {
+                    walked.cell(Span::styled(" · activity unknown", palette::AGENT));
+                }
                 if row.watched {
-                    walked.cell(Span::styled(row::WATCHED.to_string(), palette::AGENT));
+                    walked.cell(Span::styled(
+                        if self.layout.ascii { "*" } else { "◉" }.to_string(),
+                        palette::AGENT,
+                    ));
                 }
             }
             Cell::Anomalies => {
                 if let Some(anomalies) = row::anomaly_marker(&row.anomalies) {
+                    let anomalies = if self.layout.ascii {
+                        anomalies.replace(WARNING, "!")
+                    } else {
+                        anomalies
+                    };
                     walked.cell(Span::styled(anomalies, palette::ATTENTION));
                 }
             }
@@ -414,7 +459,7 @@ mod tests {
 
         assert_eq!(
             Painted::of(
-                bead_line(&row(&node), BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row(&node), BRANCH, &ids(4), &Layout::legacy()),
                 46,
                 1
             )
@@ -439,8 +484,7 @@ mod tests {
         });
         epic.agent = Some(row::agent_marker(&a_pane()));
 
-        let drawn =
-            Painted::of(bead_line(&epic, BRANCH, &ids(3), &Layout::default()), 60, 1).rows();
+        let drawn = Painted::of(bead_line(&epic, BRANCH, &ids(3), &Layout::legacy()), 60, 1).rows();
 
         let count = drawn[0].find("3/8").expect("the count is drawn");
         let agent = drawn[0].find("wCM:p9").expect("the agent is drawn");
@@ -470,8 +514,7 @@ mod tests {
         });
         epic.agent = Some(row::agent_marker(&a_pane()));
 
-        let drawn =
-            Painted::of(bead_line(&epic, BRANCH, &ids(3), &Layout::default()), 60, 1).rows();
+        let drawn = Painted::of(bead_line(&epic, BRANCH, &ids(3), &Layout::legacy()), 60, 1).rows();
 
         assert!(drawn[0].ends_with("3/8  ◍ wCM:p9 · working"), "{drawn:?}");
     }
@@ -486,7 +529,7 @@ mod tests {
         staffed.agent = Some(row::agent_marker(&a_pane()));
 
         let drawn = |row: &Row| {
-            Painted::of(bead_line(row, BRANCH, &ids(3), &Layout::default()), 60, 1).rows()
+            Painted::of(bead_line(row, BRANCH, &ids(3), &Layout::legacy()), 60, 1).rows()
         };
 
         let alone = drawn(&watched);
@@ -504,7 +547,7 @@ mod tests {
         let unwatched = row(&node("smt-4kd3p.2", "the noctalia widget", Status::Open));
 
         let drawn = Painted::of(
-            bead_line(&unwatched, BRANCH, &ids(3), &Layout::default()),
+            bead_line(&unwatched, BRANCH, &ids(3), &Layout::legacy()),
             60,
             1,
         )
@@ -527,12 +570,8 @@ mod tests {
         shut.agent = Some(row::agent_marker(&a_pane()));
         shut.shut_over = Some(counts(1, 5, 3, 0));
 
-        let drawn = Painted::of(
-            bead_line(&shut, BRANCH, &ids(3), &Layout::default()),
-            110,
-            1,
-        )
-        .rows();
+        let drawn =
+            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 110, 1).rows();
 
         let own = drawn[0].find("wCM:p9").expect("its own agent is drawn");
         let beneath = drawn[0]
@@ -553,12 +592,8 @@ mod tests {
         ));
         shut.shut_over = Some(counts(1, 5, 0, 2));
 
-        let drawn = Painted::of(
-            bead_line(&shut, BRANCH, &ids(3), &Layout::default()),
-            110,
-            1,
-        )
-        .rows();
+        let drawn =
+            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 110, 1).rows();
 
         says(&drawn[0], "2 beads to check");
     }
@@ -575,12 +610,8 @@ mod tests {
         ));
         shut.shut_over = Some(counts(4, 5, 0, 0));
 
-        let drawn = Painted::of(
-            bead_line(&shut, BRANCH, &ids(3), &Layout::default()),
-            110,
-            1,
-        )
-        .rows();
+        let drawn =
+            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 110, 1).rows();
 
         does_not_say(&drawn[0], "beneath");
     }
@@ -596,12 +627,8 @@ mod tests {
         ));
         shut.shut_over = Some(counts(1, 5, 3, 2));
 
-        let painted = Painted::of(
-            bead_line(&shut, BRANCH, &ids(3), &Layout::default()),
-            120,
-            1,
-        )
-        .row(0);
+        let painted =
+            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 120, 1).row(0);
         let colour_of = |words: &str| {
             painted
                 .iter()
@@ -652,14 +679,9 @@ mod tests {
         shut.shut_over = Some(counts(1, 22, 4, 0));
         shut.notes = vec![phrase::unfinished_beneath(21)];
 
-        let wide = Painted::of(
-            bead_line(&shut, BRANCH, &ids(3), &Layout::default()),
-            120,
-            1,
-        )
-        .rows();
+        let wide = Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 120, 1).rows();
         let narrow =
-            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::default()), 68, 1).rows();
+            Painted::of(bead_line(&shut, BRANCH, &ids(3), &Layout::legacy()), 68, 1).rows();
 
         says(&wide[0], "◍ 4 agents beneath");
         says(&wide[0], "21 unfinished beads beneath this");
@@ -685,7 +707,7 @@ mod tests {
         };
 
         let drawn = |row: &Row| {
-            Painted::of(bead_line(row, BRANCH, &ids(3), &Layout::default()), 100, 1).rows()
+            Painted::of(bead_line(row, BRANCH, &ids(3), &Layout::legacy()), 100, 1).rows()
         };
 
         says(&drawn(&step(0, false))[0], "would be unblocked");
@@ -707,8 +729,7 @@ mod tests {
             Status::Open,
         ));
 
-        let drawn =
-            Painted::of(bead_line(&leaf, BRANCH, &ids(4), &Layout::default()), 60, 1).rows();
+        let drawn = Painted::of(bead_line(&leaf, BRANCH, &ids(4), &Layout::legacy()), 60, 1).rows();
 
         assert!(!drawn[0].contains('/'), "{drawn:?}");
     }
@@ -721,13 +742,13 @@ mod tests {
         let long = node("smt-4kd3p.20", "wallpaper timer calls dms", Status::Open);
 
         let short = Painted::of(
-            bead_line(&row(&short), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&short), BRANCH, &ids(4), &Layout::legacy()),
             60,
             1,
         )
         .rows();
         let long = Painted::of(
-            bead_line(&row(&long), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&long), BRANCH, &ids(4), &Layout::legacy()),
             60,
             1,
         )
@@ -750,7 +771,7 @@ mod tests {
         staffed.agent = Some(a_pane());
         staffed.anomalies = vec![Anomaly::StaleClaim { days: 58 }];
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             100,
             1,
         )
@@ -783,7 +804,7 @@ mod tests {
         let staffed = captioned("teach the elided run to fold back open on a keypress");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             50,
             1,
         )
@@ -806,7 +827,7 @@ mod tests {
         let staffed = captioned("teach the elided run to fold back open on a keypress");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             80,
             1,
         )
@@ -834,7 +855,7 @@ mod tests {
         }];
         let layout = Layout {
             state: vec![Cell::Badge("delivery_pr".into()), Cell::Agent],
-            ..Layout::default()
+            ..Layout::legacy()
         };
 
         let drawn = Painted::of(bead_line(&row(&staffed), LAST, &ids(4), &layout), 80, 1).rows();
@@ -877,7 +898,7 @@ mod tests {
         ];
         let layout = Layout {
             state: vec![Cell::Badge("delivery_pr".into()), Cell::Agent],
-            ..Layout::default()
+            ..Layout::legacy()
         };
 
         let drawn = Painted::of(bead_line(&row(&held), LAST, &ids(4), &layout), 120, 1).rows();
@@ -901,7 +922,7 @@ mod tests {
         staffed.badges = vec![shortenable(None)];
         let layout = Layout {
             state: vec![Cell::Badge("delivery_pr".into()), Cell::Agent],
-            ..Layout::default()
+            ..Layout::legacy()
         };
 
         let drawn = Painted::of(bead_line(&row(&staffed), LAST, &ids(4), &layout), 70, 1).rows();
@@ -919,7 +940,7 @@ mod tests {
         let staffed = captioned("teach the elided run to fold back open");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             120,
             1,
         )
@@ -945,7 +966,7 @@ mod tests {
         let staffed = captioned("dish");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             57,
             1,
         )
@@ -962,7 +983,7 @@ mod tests {
         let staffed = captioned("teach the elided run to fold back open on a keypress");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             30,
             1,
         )
@@ -978,7 +999,7 @@ mod tests {
         let staffed = captioned("teach the elided run to fold back open on a keypress");
 
         let drawn = Painted::of(
-            bead_line(&row(&staffed), LAST, &ids(4), &Layout::default()),
+            bead_line(&row(&staffed), LAST, &ids(4), &Layout::legacy()),
             14,
             1,
         )
@@ -1010,7 +1031,7 @@ mod tests {
             },
         ];
         let drawn = Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             100,
             1,
         )
@@ -1058,7 +1079,7 @@ mod tests {
             identity: vec![Cell::Glyph, Cell::Badge("delivery_pr".into()), Cell::Id],
             title: vec![Cell::Title, Cell::Badges],
             state: vec![Cell::Agent, Cell::Progress, Cell::Anomalies],
-            ..Layout::default()
+            ..Layout::legacy()
         };
 
         let drawn = Painted::of(bead_line(&epic, BRANCH, &ids(3), &layout), 80, 1).rows();
@@ -1096,7 +1117,7 @@ mod tests {
         let unbadged = node("smt-4kd3p.20", "wallpaper timer calls dms", Status::Open);
         let layout = Layout {
             identity: vec![Cell::Glyph, Cell::Badge("delivery_pr".into()), Cell::Id],
-            ..Layout::default()
+            ..Layout::legacy()
         };
         let widths = Widths::from([(Cell::Badge("delivery_pr".into()), 5), (Cell::Id, 3)]);
 
@@ -1132,7 +1153,7 @@ mod tests {
         }];
         let layout = Layout {
             identity: vec![Cell::Glyph, Cell::Badge("issue_type".into()), Cell::Id],
-            ..Layout::default()
+            ..Layout::legacy()
         };
         let measured = identity_widths(&row(&badged), &layout);
         let widths = Widths::from([(Cell::Badge("issue_type".into()), 2), (Cell::Id, 3)]);
@@ -1171,7 +1192,7 @@ mod tests {
         ];
 
         let painted = Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             100,
             1,
         );
@@ -1205,7 +1226,7 @@ mod tests {
                 drawn_on: DrawnOn::Own,
             }];
             let painted = Painted::of(
-                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
                 100,
                 1,
             );
@@ -1250,7 +1271,7 @@ mod tests {
         ];
 
         let painted = Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             100,
             1,
         );
@@ -1287,7 +1308,7 @@ mod tests {
         }];
         let row = row(&badged);
 
-        let painted = Painted::of(bead_line(&row, BRANCH, &ids(4), &Layout::default()), 100, 1);
+        let painted = Painted::of(bead_line(&row, BRANCH, &ids(4), &Layout::legacy()), 100, 1);
         let badge = run_saying(&painted, "ARKHAM-19");
 
         assert_eq!(badge.style.fg, tone(&row).fg, "{badge:?}");
@@ -1314,7 +1335,7 @@ mod tests {
         }];
 
         let painted = Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             100,
             1,
         );
@@ -1345,7 +1366,7 @@ mod tests {
         ];
 
         let drawn = Painted::of(
-            bead_line(&short, BRANCH, &ids(3), &Layout::default()),
+            bead_line(&short, BRANCH, &ids(3), &Layout::legacy()),
             160,
             1,
         )
@@ -1372,7 +1393,7 @@ mod tests {
         }];
 
         let painted = Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             100,
             1,
         );
@@ -1415,7 +1436,7 @@ mod tests {
             let mut badged = node("smt-4kd3p.20", "a bead", Status::Blocked);
             badged.badges = vec![badge];
             Painted::of(
-                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
                 EXACTLY_THE_ROW,
                 1,
             )
@@ -1456,7 +1477,7 @@ mod tests {
                 drawn_on: DrawnOn::Own,
             }];
             let painted = Painted::of(
-                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
                 width,
                 1,
             );
@@ -1514,7 +1535,7 @@ mod tests {
             let mut unremarked = row(&badged);
             unremarked.notes = Vec::new();
             symbols(
-                bead_line(&unremarked, BRANCH, &ids(4), &Layout::default()),
+                bead_line(&unremarked, BRANCH, &ids(4), &Layout::legacy()),
                 width,
             )
             .contains(somewhere)
@@ -1549,7 +1570,7 @@ mod tests {
             let mut badged = node("smt-4kd3p.20", "a bead", Status::Blocked);
             badged.badges = vec![badge];
             symbols(
-                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
                 100,
             )
         };
@@ -1584,7 +1605,7 @@ mod tests {
         let mut badged = node("smt-4kd3p.20", "a bead", Status::Blocked);
         badged.badges = vec![badge];
         Painted::of(
-            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&badged), BRANCH, &ids(4), &Layout::legacy()),
             width,
             1,
         )
@@ -1655,7 +1676,7 @@ mod tests {
             let mut row = row(&badged);
             row.notes = Vec::new();
             Painted::of(
-                bead_line(&row, BRANCH, &ids(4), &Layout::default()),
+                bead_line(&row, BRANCH, &ids(4), &Layout::legacy()),
                 width,
                 1,
             )
@@ -1721,7 +1742,7 @@ mod tests {
     fn a_bead_line_too_long_for_the_width_is_cut_rather_than_wrapped() {
         let long = node("smt-4kd3p.20", &"wallpaper ".repeat(20), Status::Open);
         let drawn = Painted::of(
-            bead_line(&row(&long), BRANCH, &ids(4), &Layout::default()),
+            bead_line(&row(&long), BRANCH, &ids(4), &Layout::legacy()),
             40,
             3,
         )
@@ -1743,7 +1764,7 @@ mod tests {
             fitted(
                 &under(BRANCH, elided(15)),
                 &ids(0),
-                &Layout::default(),
+                &Layout::legacy(),
                 &at_rest(),
             ),
             72,
@@ -1768,7 +1789,7 @@ mod tests {
             fitted(
                 &under(BRANCH, elided(3)),
                 &ids(0),
-                &Layout::default(),
+                &Layout::legacy(),
                 &at_rest(),
             ),
             72,
@@ -1792,7 +1813,7 @@ mod tests {
                 &row(&node("smt-4kd3p.2", "a bead", status.clone())),
                 BRANCH,
                 &ids(3),
-                &Layout::default(),
+                &Layout::legacy(),
             );
             let painted = Painted::of(drawn, 60, 1).row(0);
 
@@ -1816,7 +1837,7 @@ mod tests {
         let node = node("smt-4kd3p.2", "a bead", Status::Open);
 
         let painted = Painted::of(
-            bead_line(&row(&node), BRANCH, &ids(3), &Layout::default()),
+            bead_line(&row(&node), BRANCH, &ids(3), &Layout::legacy()),
             60,
             1,
         )
@@ -1836,7 +1857,7 @@ mod tests {
         let node = node("smt-4kd3p.2", "a bead", Status::Open);
         let layout = Layout {
             open_id: Colour::Slot(Slot::Identity),
-            ..Layout::default()
+            ..Layout::legacy()
         };
 
         let painted = Painted::of(bead_line(&row(&node), BRANCH, &ids(3), &layout), 60, 1).row(0);
@@ -1859,7 +1880,7 @@ mod tests {
     fn the_colour_named_for_an_open_id_leaves_every_other_status_alone() {
         let layout = Layout {
             open_id: Colour::Slot(Slot::Identity),
-            ..Layout::default()
+            ..Layout::legacy()
         };
         for status in [Status::InProgress, Status::Blocked, Status::Closed] {
             let node = node("smt-4kd3p.2", "a bead", status.clone());

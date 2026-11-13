@@ -1,3 +1,9 @@
+> This file describes the upstream design. For this fork, the agreed changes
+> in [INTENDED-CHANGES.md](../INTENDED-CHANGES.md) and the implemented contracts in
+> [the fork guide](passive-activity.md) supersede upstream filtering, key bindings,
+> row appearance and pane-only execution assumptions. Workflow-specific task
+> interpretation remains in the optional adapter, outside generic rendering.
+
 # beady-eye — design
 
 Status: describes `bdi` as built, reconciled against `main` on 2026-09-02

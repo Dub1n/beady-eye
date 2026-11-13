@@ -94,40 +94,40 @@ fn dropping_the_filter_re_renders_rather_than_re_collecting() {
 }
 
 #[test]
-fn collapsing_an_expanded_node_and_then_collapsing_again_moves_to_its_parent() {
+fn space_folds_and_left_selects_the_parent_independently() {
     let mut forest = flatten(snapshot());
     open(&mut forest, &key("dunwich", "dun-7.1"));
-
-    assert!(forest.apply(Action::CollapseOrParent));
+    assert!(forest.apply(Action::ToggleFold));
     assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1")));
     assert!(!sketch(&forest).iter().any(|line| line.contains(".1.1")));
-
     assert!(forest.apply(Action::CollapseOrParent));
     assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7")));
 }
 
 #[test]
-fn expanding_a_collapsed_node_and_then_expanding_again_moves_to_its_first_child() {
+fn right_focuses_the_selected_branch_and_space_opens_it() {
     let mut forest = flatten(snapshot());
     open(&mut forest, &key("dunwich", "dun-7.1"));
-    forest.apply(Action::CollapseOrParent);
-
+    forest.apply(Action::ToggleFold);
     assert!(forest.apply(Action::ExpandOrChild));
     assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1")));
-
-    assert!(forest.apply(Action::ExpandOrChild));
-    assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1.1")));
+    assert!(forest.is_focused());
+    assert!(forest.apply(Action::ToggleFold));
+    assert!(drawn_here(&forest, "true the mount"));
+    assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1")));
 }
 
 #[test]
-fn a_leaf_has_no_child_to_move_to_and_no_fold_to_collapse() {
+fn right_focuses_a_leaf_and_left_reveals_its_parent_retaining_selection() {
     let mut forest = flatten(snapshot());
     open(&mut forest, &key("dunwich", "dun-7.1"));
     select(&mut forest, &key("dunwich", "dun-7.1.1"));
-
-    assert!(!forest.apply(Action::ExpandOrChild));
+    assert!(forest.apply(Action::ExpandOrChild));
+    assert!(forest.is_focused());
+    assert_eq!(forest.lines()[forest.selected_line()].folded, None);
     assert!(forest.apply(Action::CollapseOrParent));
-    assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1")));
+    assert_eq!(cursor(&forest), Some(&key("dunwich", "dun-7.1.1")));
+    assert!(drawn_here(&forest, "re-point the dish"));
 }
 
 #[test]

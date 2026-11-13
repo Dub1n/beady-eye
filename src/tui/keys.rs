@@ -82,8 +82,20 @@ pub(super) const BINDINGS: &[Binding] = &[
     Binding {
         keys: &[alone(KeyCode::Char('a'), "a")],
         action: Action::ToggleFilter,
-        does: "show every tree, not only those with a live agent",
+        does: "show every tree in the collected snapshot",
         hint: Some("all"),
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('z'), "z")],
+        action: Action::ToggleCompleted,
+        does: "show or hide completed beads within the current scope",
+        hint: None,
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('x'), "x")],
+        action: Action::ToggleFixtures,
+        does: "show or hide configured disposable fixture records",
+        hint: None,
     },
     Binding {
         keys: &[alone(KeyCode::Char('?'), "?")],
@@ -99,6 +111,12 @@ pub(super) const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: &[alone(KeyCode::Char('v'), "v")],
+        action: Action::NextScope,
+        does: "cycle Current, Activity, and History",
+        hint: None,
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('V'), "V")],
         action: Action::NextView,
         does: "open the next view, keeping r; after the last, leave the views",
         hint: None,
@@ -232,13 +250,13 @@ pub(super) const BINDINGS: &[Binding] = &[
             alone(KeyCode::Char('l'), "l"),
         ],
         action: Action::ExpandOrChild,
-        does: "expand, or move to the first child when it is already expanded",
+        does: "focus the selected subtree",
         hint: None,
     },
     Binding {
         keys: &[alone(KeyCode::Left, "Left"), alone(KeyCode::Char('h'), "h")],
         action: Action::CollapseOrParent,
-        does: "collapse, or move to the parent when it is already collapsed",
+        does: "select parent; at displayed root, reveal parent level",
         hint: None,
     },
     Binding {
@@ -254,7 +272,13 @@ pub(super) const BINDINGS: &[Binding] = &[
         hint: None,
     },
     Binding {
-        keys: &[alone(KeyCode::Home, "Home"), alone(KeyCode::Char('g'), "g")],
+        keys: &[alone(KeyCode::Home, "Home")],
+        action: Action::Home,
+        does: "restore the default current-work forest",
+        hint: None,
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('g'), "g")],
         action: Action::Move(Motion::FirstRow),
         does: "move to the first row",
         hint: None,
@@ -538,6 +562,7 @@ pub(super) mod tests {
     /// above it has grown too.
     fn every_action() -> Vec<Action> {
         let every = vec![
+            Action::Home,
             Action::Move(Motion::PreviousRow),
             Action::Move(Motion::NextRow),
             Action::Move(Motion::HalfScreenUp),
@@ -556,8 +581,11 @@ pub(super) mod tests {
             Action::CycleSpine,
             Action::CycleSpineForest,
             Action::ToggleFilter,
+            Action::ToggleCompleted,
+            Action::ToggleFixtures,
             Action::ToggleReadyList,
             Action::NextView,
+            Action::NextScope,
             Action::ToggleTail,
             Action::Focus,
             Action::FocusForest,
@@ -575,6 +603,7 @@ pub(super) mod tests {
 
         for action in &every {
             match action {
+                Action::Home => (),
                 Action::Move(motion) => match motion {
                     Motion::PreviousRow
                     | Motion::NextRow
@@ -595,8 +624,11 @@ pub(super) mod tests {
                 | Action::CycleSpine
                 | Action::CycleSpineForest
                 | Action::ToggleFilter
+                | Action::ToggleCompleted
+                | Action::ToggleFixtures
                 | Action::ToggleReadyList
                 | Action::NextView
+                | Action::NextScope
                 | Action::ToggleTail
                 | Action::Focus
                 | Action::FocusForest
@@ -832,7 +864,6 @@ pub(super) mod tests {
             (key(KeyCode::Char('l')), Action::ExpandOrChild),
             (key(KeyCode::Right), Action::ExpandOrChild),
             (key(KeyCode::Char('g')), Action::Move(Motion::FirstRow)),
-            (key(KeyCode::Home), Action::Move(Motion::FirstRow)),
             (key(KeyCode::Char('G')), Action::Move(Motion::LastRow)),
             (key(KeyCode::End), Action::Move(Motion::LastRow)),
             (control('d'), Action::Move(Motion::HalfScreenDown)),
@@ -844,9 +875,14 @@ pub(super) mod tests {
             (key(KeyCode::Char('f')), Action::Focus),
             (key(KeyCode::Esc), Action::Back),
             (key(KeyCode::Char('y')), Action::CopyId),
+            (key(KeyCode::Home), Action::Home),
+            (key(KeyCode::Char('g')), Action::Move(Motion::FirstRow)),
             (key(KeyCode::Char('a')), Action::ToggleFilter),
+            (key(KeyCode::Char('z')), Action::ToggleCompleted),
+            (key(KeyCode::Char('x')), Action::ToggleFixtures),
             (key(KeyCode::Char('r')), Action::ToggleReadyList),
-            (key(KeyCode::Char('v')), Action::NextView),
+            (key(KeyCode::Char('v')), Action::NextScope),
+            (key(KeyCode::Char('V')), Action::NextView),
             (key(KeyCode::Char('s')), Action::CycleSpine),
             (key(KeyCode::Char('S')), Action::CycleSpineForest),
             (key(KeyCode::Char('F')), Action::FocusForest),
@@ -971,7 +1007,7 @@ pub(super) mod tests {
     /// their own, and a key nothing is bound to asks for nothing.
     #[test]
     fn a_key_bound_to_nothing_asks_for_nothing() {
-        for pressed in [key(KeyCode::Char('u')), key(KeyCode::Char('z'))] {
+        for pressed in [key(KeyCode::Char('u')), key(KeyCode::F(12))] {
             assert_eq!(action(pressed), None, "for {pressed:?}");
         }
     }

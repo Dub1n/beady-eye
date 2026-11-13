@@ -48,6 +48,10 @@ pub(super) struct Ground {
     pub(super) runs: HashMap<Counted, Count>,
     /// Whether what a shut fold hides is drawn as well.
     pub(super) beneath_shut: bool,
+    pub(super) row: crate::view::row::Layout,
+    pub(super) show_fixtures: bool,
+    pub(super) show_completed: bool,
+    pub(super) preserve_completed: Option<crate::model::join::BeadKey>,
 }
 
 /// What a subtree left undrawn is counted from: a bead copy, where it

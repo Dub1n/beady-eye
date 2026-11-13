@@ -23,7 +23,7 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 asset="bdi-$target"
-base="https://github.com/CodeForBreakfast/beady-eye/releases/download/v$version"
+base="https://github.com/Dub1n/beady-eye/releases/download/v$version"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

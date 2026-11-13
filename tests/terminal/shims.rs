@@ -390,9 +390,37 @@ pub fn shims_first_with_nothing_called(absent: &str, beside: &Path) -> (String, 
     }
 
     let inherited = std::env::var("PATH").unwrap_or_default();
+    // Keep the shell utilities the shims need even if the deliberately
+    // removed program shares /usr/bin (and /bin) with all of them.
+    for utility in [
+        "cat", "head", "mkdir", "sleep", "env", "dirname", "basename", "uname", "sed", "awk",
+        "python3", "sh", "realpath", "readlink", "date", "wc", "tail", "tr", "cut", "grep", "sort",
+    ] {
+        let named = ours.join(utility);
+        if utility == absent || named.exists() {
+            continue;
+        }
+        if let Some(program) = inherited
+            .split(':')
+            .map(|directory| Path::new(directory).join(utility))
+            .find(|program| program.is_file())
+        {
+            std::os::unix::fs::symlink(program, named).expect("test utility link");
+        }
+    }
     let elsewhere: Vec<&str> = inherited
         .split(':')
-        .filter(|directory| !Path::new(directory).join(absent).exists())
+        .filter(|directory| {
+            // An inaccessible inherited directory can make POSIX execvp
+            // return EACCES rather than ENOENT for the deliberately absent
+            // program. Missing-program tests need a searchable test PATH.
+            let Ok(directory_c) = std::ffi::CString::new(directory.as_bytes()) else {
+                return false;
+            };
+            Path::new(directory).is_dir()
+                && unsafe { libc::access(directory_c.as_ptr(), libc::X_OK) == 0 }
+                && !Path::new(directory).join(absent).exists()
+        })
         .collect();
     (
         "PATH".to_string(),

@@ -263,7 +263,7 @@ fn a_hidden_tree_is_drawn_in_the_group_as_its_project_would_draw_it() {
         "a hidden tree rests shut"
     );
 
-    assert!(forest.apply(Action::ExpandOrChild));
+    assert!(forest.apply(Action::ToggleFold));
 
     let in_the_group = beneath_the_selection(&forest);
     assert_eq!(
@@ -323,7 +323,7 @@ fn the_default_puts_an_opened_hidden_tree_back() {
     let mut forest = flatten(snapshot());
     select_hidden_tree(&mut forest);
     let shut = beneath_the_selection(&forest);
-    forest.apply(Action::ExpandOrChild);
+    forest.apply(Action::ToggleFold);
     assert_ne!(beneath_the_selection(&forest), shut, "the tree opened");
 
     forest.apply(Action::RestoreDefault);
@@ -344,7 +344,7 @@ fn the_default_puts_an_opened_hidden_tree_back() {
 fn a_refresh_keeps_a_hidden_tree_opened_by_hand_open() {
     let mut forest = flatten(snapshot());
     select_hidden_tree(&mut forest);
-    assert!(forest.apply(Action::ExpandOrChild));
+    assert!(forest.apply(Action::ToggleFold));
     let opened = beneath_the_selection(&forest);
 
     forest.refresh(snapshot());
@@ -371,7 +371,7 @@ fn a_hidden_tree_with_nothing_beneath_its_root_offers_no_fold() {
         beneath_the_selection(&forest),
         ["      └── ○ hbr-1 moor the lightship"]
     );
-    assert!(!forest.apply(Action::ExpandOrChild), "nothing to open onto");
+    assert!(!forest.apply(Action::ToggleFold), "nothing to open onto");
 }
 
 /// A hidden tree's facts are a tree's facts, answered when the forest
@@ -383,7 +383,7 @@ fn a_keystroke_in_the_hidden_trees_group_walks_no_subtree() {
     let before = walks_on_this_thread();
 
     select_hidden_tree(&mut forest);
-    forest.apply(Action::ExpandOrChild);
+    forest.apply(Action::ToggleFold);
     forest.apply(Action::Move(Motion::NextRow));
 
     assert_eq!(walks_on_this_thread() - before, 0);
@@ -652,7 +652,7 @@ fn said_once_its_failed_project_is_opened(failure: TrackerFailure) -> Vec<String
         .unwrap_or_else(|| panic!("the failed project has a group: {:#?}", sketch(&forest)));
     step_onto(&mut forest, group);
 
-    forest.apply(Action::ExpandOrChild);
+    forest.apply(Action::ToggleFold);
 
     forest
         .lines()

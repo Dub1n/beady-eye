@@ -230,33 +230,34 @@ fn e_c_and_d_fold_the_subtree_under_the_selection() {
     assert_eq!(forest(&mut shown, &TALL), AT_REST);
 }
 
-/// `l` opens a shut node and steps into an open one; `h` shuts an open node
-/// and steps out of a shut one; Space turns the fold whichever way it is not
-/// pointing. All on one row, the second copy of the blocker.
+/// Right focuses the selected copy, Left reveals that copy's parent scope,
+/// and Space changes its fold independently of scope navigation.
 #[test]
-fn l_h_and_space_move_one_fold_and_the_selection_through_it() {
+fn right_left_and_space_control_scope_selection_and_folding() {
     let mut shown = over_every_fold_kind();
     clicked_on(&mut shown, &TALL, THE_COPY_UNDER_IT);
-
-    press(&mut shown, OPEN_OR_STEP_IN);
-    assert_eq!(forest(&mut shown, &TALL), THE_COPY_OPEN);
-
-    press(&mut shown, OPEN_OR_STEP_IN);
-    assert_eq!(forest(&mut shown, &TALL), THE_COPY_OPEN);
-    assert_eq!(selected(&shown), "ark-1.1.1");
-
-    press(&mut shown, SHUT_OR_STEP_OUT);
-    assert_eq!(forest(&mut shown, &TALL), THE_COPY_OPEN);
     assert_eq!(selected(&shown), "ark-1.1");
-
+    press(&mut shown, OPEN_OR_STEP_IN);
+    assert_eq!(selected(&shown), "ark-1.1");
+    assert_eq!(
+        shown.forest.focused_on(),
+        [bead("arkham", "ark-1.1")].into()
+    );
+    press(&mut shown, OPEN_OR_STEP_IN);
+    assert_eq!(selected(&shown), "ark-1.1");
     press(&mut shown, SHUT_OR_STEP_OUT);
-    assert_eq!(forest(&mut shown, &TALL), AT_REST);
-
+    assert_eq!(selected(&shown), "ark-1.1");
+    assert_eq!(
+        shown.forest.focused_on(),
+        [bead("arkham", "ark-1.2")].into()
+    );
+    let fold = |shown: &Shown| shown.forest.lines()[shown.forest.selected_line()].folded;
+    let before = fold(&shown).expect("this branch can fold");
     press(&mut shown, TOGGLE);
-    assert_eq!(forest(&mut shown, &TALL), THE_COPY_OPEN);
-
+    assert_eq!(fold(&shown), Some(!before));
+    assert_eq!(selected(&shown), "ark-1.1");
     press(&mut shown, TOGGLE);
-    assert_eq!(forest(&mut shown, &TALL), AT_REST);
+    assert_eq!(fold(&shown), Some(before));
 }
 
 /// The motions walk the opened forest row by row, and the view follows the

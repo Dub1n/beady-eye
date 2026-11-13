@@ -1,3 +1,7 @@
+> Fork additions: [compact rows, navigation and passive OmO activity](passive-activity.md)
+> documents `[omo.<project>]`, `[fixture_filters.<project>]`, and the additional
+> `[row]` options. Those sections supersede upstream row/navigation defaults below.
+
 # Configuring `bdi`
 
 `bdi` reads `~/.config/beady-eye/config.toml`, or the file `--config` names,

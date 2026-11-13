@@ -27,14 +27,10 @@ pub(crate) const OPEN: &str = "▾ ";
 pub(crate) const SHUT: &str = "▸ ";
 /// A tree's children start under its header's marker, not under its project.
 pub(crate) const INDENT: &str = "  ";
-const BRANCH: char = '├';
-const LAST: char = '└';
 /// The arm from a line's elbow to its glyph, two columns of it. A bead hung
 /// under one it blocks hangs on the dashed one: the nesting is the same and
 /// means a different thing — part of that, or what that cannot finish until
 /// — and the arm is where the row says which.
-const ARM: char = '─';
-const BLOCKS_ARM: char = '┄';
 /// A shut marker is drawn into the arm's last column rather than appended
 /// after it. Appended, it would cost its own two columns, and a line's
 /// content would then start further right for having something folded under
@@ -44,8 +40,6 @@ const SHUT_IN_THE_ARM: char = '▸';
 /// bead it waits on, because there the tree reads upward: each line waits on
 /// the line it hangs under, where in the forest it is part of it.
 const UP_THE_ARM: char = '↑';
-const TRUNK: &str = "│   ";
-const GAP: &str = "    ";
 
 /// Where a line sits in the walk that drew it: the tree it was drawn in, and
 /// the beads stepped through below that tree's root to reach it.
@@ -339,7 +333,15 @@ pub(crate) fn root_key(tree: &Tree) -> BeadKey {
 
 /// A header, a group and a shut node say so; an open node says it by drawing
 /// its children, and spending a marker on it would only cost the row width.
+#[cfg(test)]
 pub(crate) fn marker(open: bool) -> &'static str {
+    marker_with(open, false)
+}
+
+pub(crate) fn marker_with(open: bool, ascii: bool) -> &'static str {
+    if ascii {
+        return if open { "v " } else { "> " };
+    }
     if open {
         OPEN
     } else {
@@ -347,7 +349,7 @@ pub(crate) fn marker(open: bool) -> &'static str {
     }
 }
 
-/// Where a line sits, in four columns a level of depth. A line resting shut
+/// Where a line sits, in `indent + 2` columns a level of depth. A line resting shut
 /// says so inside its own elbow, so the fold state costs no width and every
 /// line at a depth starts in the same column.
 ///
@@ -356,29 +358,100 @@ pub(crate) fn marker(open: bool) -> &'static str {
 /// under its parent and again under something it blocks is two statements
 /// rather than one row twice. Every other kind of line, and a root, hangs by
 /// no edge and takes the solid arm.
+#[cfg(test)]
 pub(crate) fn prefix(trunk: &[bool], last: bool, shut: bool, edge: Option<&Edge>) -> String {
-    elbow(trunk, last, edge, shut.then_some(SHUT_IN_THE_ARM))
+    prefix_with(trunk, last, shut, edge, 4, false)
+}
+
+/// `prefix` with the row layout's total per-level width and connector style.
+pub(crate) fn prefix_with(
+    trunk: &[bool],
+    last: bool,
+    shut: bool,
+    edge: Option<&Edge>,
+    indent: u8,
+    ascii: bool,
+) -> String {
+    elbow(
+        trunk,
+        last,
+        edge,
+        shut.then_some(SHUT_IN_THE_ARM),
+        indent,
+        ascii,
+    )
 }
 
 /// `prefix` for a line the ready list hangs under the bead it waits on: the
 /// same connectors, with the arm ending in an arrow up.
-pub(crate) fn upward_prefix(trunk: &[bool], last: bool, edge: &Edge) -> String {
-    elbow(trunk, last, Some(edge), Some(UP_THE_ARM))
+pub(crate) fn upward_prefix_with(
+    trunk: &[bool],
+    last: bool,
+    edge: &Edge,
+    indent: u8,
+    ascii: bool,
+) -> String {
+    elbow(trunk, last, Some(edge), Some(UP_THE_ARM), indent, ascii)
 }
 
-fn elbow(trunk: &[bool], last: bool, edge: Option<&Edge>, end: Option<char>) -> String {
+fn elbow(
+    trunk: &[bool],
+    last: bool,
+    edge: Option<&Edge>,
+    end: Option<char>,
+    indent: u8,
+    ascii: bool,
+) -> String {
+    let indent = usize::from(indent.max(1));
     let mut drawn = String::from(INDENT);
+    let (trunk_char, branch, corner, arm, blocks_arm) = if ascii {
+        ('|', '+', '+', '-', '-')
+    } else {
+        ('│', '├', '└', '─', '┄')
+    };
     for more in trunk {
-        drawn.push_str(if *more { TRUNK } else { GAP });
+        if *more {
+            drawn.push(trunk_char);
+            drawn.push_str(&" ".repeat(indent - 1));
+        } else {
+            drawn.push_str(&" ".repeat(indent));
+        }
     }
     let arm = match edge {
-        Some(Edge::Blocks) => BLOCKS_ARM,
-        Some(Edge::ParentChild | Edge::Other(_)) | None => ARM,
+        Some(Edge::Blocks) if !ascii => blocks_arm,
+        Some(Edge::Blocks) => blocks_arm,
+        Some(Edge::ParentChild | Edge::Other(_)) | None => arm,
     };
-    drawn.push(if last { LAST } else { BRANCH });
-    drawn.push(arm);
-    drawn.push(end.unwrap_or(arm));
-    drawn.push(' ');
+    let end = end.map(|end| {
+        if ascii && end == SHUT_IN_THE_ARM {
+            '>'
+        } else if ascii && end == UP_THE_ARM {
+            '^'
+        } else {
+            end
+        }
+    });
+    if let Some(end) = end {
+        if indent >= 3 {
+            drawn.push(if last { corner } else { branch });
+            for _ in 0..indent.saturating_sub(3) {
+                drawn.push(arm);
+            }
+            drawn.push(end);
+            drawn.push(' ');
+        } else {
+            drawn.push(end);
+            drawn.push_str(&" ".repeat(indent.saturating_sub(1)));
+        }
+    } else {
+        drawn.push(if last { corner } else { branch });
+        for _ in 0..indent.saturating_sub(2) {
+            drawn.push(arm);
+        }
+        if indent >= 2 {
+            drawn.push(' ');
+        }
+    }
     drawn
 }
 
@@ -396,7 +469,19 @@ pub(crate) fn notes_of(tree: &Tree) -> Vec<Note> {
 /// Whether nothing is happening on this bead: nobody working it, and nothing
 /// wrong with it. Says nothing about its children.
 pub(crate) fn quiet(node: &Node) -> bool {
-    node.agent.is_none() && node.anomalies.is_empty()
+    node.agent.is_none()
+        && node.anomalies.is_empty()
+        && !node.activity.as_ref().is_some_and(|activity| {
+            matches!(
+                activity.state,
+                crate::collect::omo::ActivityState::Working
+                    | crate::collect::omo::ActivityState::Finished
+                    | crate::collect::omo::ActivityState::AwaitingAcceptance
+                    | crate::collect::omo::ActivityState::Failed
+                    | crate::collect::omo::ActivityState::Cancelled
+                    | crate::collect::omo::ActivityState::Conflict
+            )
+        })
 }
 
 /// Every question below is asked of one line, and a line is a bead at the

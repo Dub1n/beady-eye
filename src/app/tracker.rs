@@ -383,7 +383,11 @@ fn trees(
     let mut roots = roots_named(cfg, project);
     let mut ancestors: BTreeMap<String, Climbed> = BTreeMap::new();
     let mut climbed: BTreeSet<Climbed> = BTreeSet::new();
-    for bead in unfinished(beads) {
+    for bead in beads
+        .iter()
+        .filter(|bead| !bead.status.is_finished())
+        .map(|bead| bead.id.as_str())
+    {
         climbed.extend(root_of(bead, &parents, &mut ancestors));
     }
     for named in beads_named_here(panes, project, cfg) {
@@ -414,6 +418,45 @@ fn trees(
         })
         .collect();
     read.extend(what_no_root_reached(&nesting, &read));
+    // Preserve the established roots of unfinished components (including
+    // cycles), then retain historical components for the History view.
+    let mut seen: BTreeSet<String> = read
+        .iter()
+        .filter_map(|(_, found)| found.as_ref().ok())
+        .flat_map(|found| found.beads.iter().map(|bead| bead.id.clone()))
+        .collect();
+    for bead in beads {
+        if seen.contains(&bead.id) {
+            continue;
+        }
+        // A parent chain may be malformed or cyclic. Do not add a second
+        // historical entry into a component already represented by a root.
+        let mut parent = bead.parent.as_deref();
+        let mut visited = BTreeSet::new();
+        let mut represented = false;
+        while let Some(id) = parent {
+            if seen.contains(id) {
+                represented = true;
+                break;
+            }
+            if !visited.insert(id) {
+                break;
+            }
+            parent = parents.get(id).copied().flatten();
+        }
+        if represented {
+            continue;
+        }
+        for root in nesting.top_of(&bead.id) {
+            if seen.contains(&root) {
+                continue;
+            }
+            if let Ok(assembled) = nesting.assemble(&root) {
+                seen.extend(assembled.beads.iter().map(|bead| bead.id.clone()));
+                read.push((root, Ok(assembled)));
+            }
+        }
+    }
     read.sort_by(|(one, _), (two, _)| one.cmp(two));
     read
 }
@@ -460,25 +503,6 @@ fn what_no_root_reached(
             (id, read)
         })
         .collect()
-}
-
-/// Every bead that marks unfinished work: the beads discovery climbs to a
-/// root from, read off the listing rather than asked of bd, which would
-/// answer with a subset of the rows already in hand.
-///
-/// Unfinished rather than claimed: an effort holds the work it has left after
-/// its last seat stands down, and a rule that noticed only a claim lost the
-/// whole tree at that moment. `closed` and `pinned` are the statuses bd
-/// stores that this leaves out, and that is the whole of the rule.
-///
-/// Wisps are in the listing too, and one with no parent is a root of its own:
-/// every step of a bd molecule hangs under it, so the one rootless row is the
-/// whole run.
-fn unfinished(beads: &[Arc<Bead>]) -> impl Iterator<Item = &str> {
-    beads
-        .iter()
-        .filter(|bead| !bead.status.is_finished())
-        .map(|bead| bead.id.as_str())
 }
 
 /// The trees the config names for this project, drawn beside the ones
@@ -813,7 +837,7 @@ dunwich = ["dun-4"]
     /// which bd keeps indefinitely and never counts as work, beside a hooked
     /// one, which bd counts as work in flight.
     #[test]
-    fn discovery_names_every_unfinished_bead_and_wisp_and_nothing_finished() {
+    fn discovery_retains_unfinished_and_historical_beads_and_wisps() {
         let listing = r#"[
           {"id":"dun-7","title":"lift the ground station","status":"closed",
            "priority":1,"issue_type":"epic"},
@@ -851,8 +875,8 @@ dunwich = ["dun-4"]
         let roots: BTreeSet<&str> = snap.trees.iter().map(|t| t.root.as_str()).collect();
         assert_eq!(
             roots,
-            BTreeSet::from(["dun-7", "dun-9", "dun-11", "dun-wisp-a1"]),
-            "the open task climbs to its closed epic; the deferred bead, the hooked bead and the open wisp are roots of their own"
+            BTreeSet::from(["dun-7", "dun-8", "dun-9", "dun-10", "dun-11", "dun-wisp-a1", "dun-wisp-b2"]),
+            "unfinished roots and closed historical components are retained for separate view filters"
         );
     }
 
@@ -1365,7 +1389,13 @@ dunwich = ["dun-c3"]
                              "priority":2,"issue_type":"task"}]"#;
         let trackers = dunwich_with(dunwich_tracker().also(beads(unrelated)));
 
-        let snap = run(&one_project(), &panes(), &trackers, Filter::All, now());
+        let snap = run(
+            &one_project(),
+            &panes(),
+            &trackers,
+            Filter::CurrentWork,
+            now(),
+        );
 
         let roots: Vec<&str> = snap.trees.iter().map(|t| t.root.as_str()).collect();
         assert_eq!(roots, vec!["dun-7"]);
@@ -1381,7 +1411,13 @@ dunwich = ["dun-c3"]
                            "priority":2,"issue_type":"task"}]"#;
         let trackers = dunwich_with(dunwich_tracker().also(beads(waiting)));
 
-        let snap = run(&one_project(), &panes(), &trackers, Filter::All, now());
+        let snap = run(
+            &one_project(),
+            &panes(),
+            &trackers,
+            Filter::CurrentWork,
+            now(),
+        );
 
         let roots: Vec<&str> = snap.trees.iter().map(|t| t.root.as_str()).collect();
         assert_eq!(roots, vec!["dun-7"]);
@@ -2114,8 +2150,8 @@ dunwich = ["dun-404"]
             "a pane on a bead in a tree the focus left out is still placed"
         );
         let mut expected = drawn_roots(&unnamed);
-        expected.push(("dunwich", "dun-4"));
         expected.sort();
+        expected.dedup();
         let mut drawn = drawn_roots(&left);
         drawn.sort();
         assert_eq!(drawn, expected);
@@ -2213,7 +2249,7 @@ dunwich = ["dun-404"]
             .expect("dunwich is configured");
         let trackers = dunwich_with(dunwich_tracker().also(beads(MAST_TREE)));
 
-        let snap = run(&cfg, &panes(), &trackers, Filter::All, now());
+        let snap = run(&cfg, &panes(), &trackers, Filter::CurrentWork, now());
 
         assert_eq!(drawn_roots(&snap), vec![("dunwich", "dun-7")]);
     }
@@ -2329,9 +2365,20 @@ dunwich = ["dun-404"]
             .collect();
         assert_eq!(
             roots,
-            vec![("dunwich", "dun-4"), ("dunwich", "x-1"), ("ferry", "x-1")],
-            "ferry draws no tree for a bead no pane of its own named"
+            vec![
+                ("dunwich", "dun-4"),
+                ("dunwich", "x-1"),
+                ("ferry", "x-1"),
+                ("ferry", "dun-4")
+            ],
+            "history retains both projects; only the owning project gets the pane"
         );
+        let foreign = snap
+            .trees
+            .iter()
+            .find(|t| t.project == "ferry" && t.root == "dun-4")
+            .unwrap();
+        assert!(foreign.beads.iter().all(|b| b.agent.is_none()));
     }
 
     /// A pane has to resolve to a project before the id it names means
@@ -2346,7 +2393,13 @@ dunwich = ["dun-404"]
         )]);
         let trackers = dunwich_with(dunwich_tracker().also(beads(MAST_TREE)));
 
-        let snap = run(&one_project(), &panes, &trackers, Filter::All, now());
+        let snap = run(
+            &one_project(),
+            &panes,
+            &trackers,
+            Filter::CurrentWork,
+            now(),
+        );
 
         let roots: Vec<&str> = snap.trees.iter().map(|t| t.root.as_str()).collect();
         assert_eq!(roots, vec!["dun-7"]);

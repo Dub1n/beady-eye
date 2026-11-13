@@ -140,7 +140,7 @@ impl Reload {
     /// band's pane read is: a check that is not due answers `Untouched` and
     /// touches nothing.
     pub(super) fn checks(&mut self, now: DateTime<Utc>) -> Reloaded<'_> {
-        if !self.at.is_some_and(|at| at <= now) {
+        if self.at.is_none_or(|at| at > now) {
             return Reloaded::Untouched;
         }
         self.at = due_after(now, self.every);

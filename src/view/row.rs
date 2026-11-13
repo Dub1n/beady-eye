@@ -8,6 +8,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use crate::collect::omo::Activity;
 use crate::config::Colour;
 use crate::model::badges::Badged;
 use crate::model::join::AgentRef;
@@ -15,6 +16,9 @@ use crate::model::snapshot::{Counts, Node};
 use crate::model::types::Status;
 use crate::view::fitted;
 use crate::view::phrase;
+
+#[path = "appearance.rs"]
+pub mod appearance;
 
 /// A live agent. The mock's marker, kept in the role the mock gave it.
 pub const AGENT: char = '◍';
@@ -38,9 +42,17 @@ pub struct Progress {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub status: Status,
+    /// Passive execution record for details and activity-aware rendering.
+    pub activity: Option<Activity>,
+    pub activity_model: Option<String>,
+    pub activity_state: Option<String>,
+    pub activity_fresh: Option<bool>,
+    pub activity_evidence: Vec<String>,
     /// What the reader sees for `status`.
     pub glyph: char,
     pub id: String,
+    /// Parent-relative ID retained only for the explicit legacy layout.
+    pub display_id: String,
     pub title: String,
     /// Each badge's text, and where it points where its config gave it
     /// somewhere. The text is drawn and fitted; the URL is neither.
@@ -173,16 +185,55 @@ pub struct Layout {
     /// What an open bead's id is drawn in. `bd` sends no colour for open, so
     /// the default leaves the id in the row's tone like the rest of the row.
     pub open_id: Colour,
+    /// Total columns per hierarchy level, including its connector (minimum one;
+    /// nominal compact default two).
+    #[serde(default = "default_indent")]
+    pub indent: u8,
+    /// Use ASCII connector characters where the terminal cannot draw box lines.
+    #[serde(default)]
+    pub ascii: bool,
+    /// Show bead IDs in tree rows. Details and row identity always retain them.
+    #[serde(default)]
+    pub show_ids: bool,
+    /// Use compact bracket markers and ID-free rows.
+    #[serde(default = "default_compact")]
+    pub compact: bool,
+}
+
+const fn default_indent() -> u8 {
+    2
+}
+const fn default_compact() -> bool {
+    true
 }
 
 impl Default for Layout {
-    /// The row as it has always been drawn.
+    /// A compact tree row with the status marker and no repeated bead ID.
     fn default() -> Self {
         Self {
-            identity: vec![Cell::Glyph, Cell::Id],
+            identity: vec![Cell::Glyph],
             title: vec![Cell::Title, Cell::Badges],
             state: vec![Cell::Progress, Cell::Agent, Cell::Anomalies],
             open_id: Colour::Status,
+            indent: default_indent(),
+            ascii: false,
+            show_ids: false,
+            compact: default_compact(),
+        }
+    }
+}
+
+impl Layout {
+    /// The prior glyph-and-abbreviated-ID row, for consumers that explicitly
+    /// need the established presentation.
+    #[cfg(test)]
+    pub fn legacy() -> Self {
+        Self {
+            identity: vec![Cell::Glyph, Cell::Id],
+            indent: 4,
+            show_ids: true,
+            compact: false,
+            ..Self::default()
         }
     }
 }
@@ -291,7 +342,7 @@ pub fn says_the_same_about_its_link(badge: &Badged, said: &str) -> bool {
 /// and what it carries, such as a pull request's link, is why the bead waits.
 pub fn cells(
     node: &Node,
-    parent: Option<&str>,
+    _parent: Option<&str>,
     progress: Option<Progress>,
     shut: Option<Shut>,
 ) -> Row {
@@ -338,17 +389,51 @@ pub fn cells(
             .map(|badge| phrase::unopenable_short(&badge.key)),
     );
 
+    let mut anomalies: Vec<String> = node.anomalies.iter().map(phrase::anomaly).collect();
+    if node
+        .activity
+        .as_ref()
+        .is_some_and(|activity| activity.state == crate::collect::omo::ActivityState::Conflict)
+        && !matches!(node.status, Status::InProgress)
+    {
+        anomalies.push("activity conflict".into());
+    }
+
     Row {
         status: node.status.clone(),
+        activity: node.activity.clone(),
+        activity_model: node
+            .activity
+            .as_ref()
+            .and_then(|a| a.model_label())
+            .map(str::to_owned),
+        activity_state: node
+            .activity
+            .as_ref()
+            .filter(|activity| {
+                activity.fresh != Some(false) || !matches!(node.status, Status::InProgress)
+            })
+            .map(|a| a.state_label().to_owned())
+            .or_else(|| {
+                matches!(node.status, Status::InProgress).then(|| "Activity unknown".into())
+            }),
+        activity_fresh: node.activity.as_ref().and_then(|a| a.fresh),
+        activity_evidence: node
+            .activity
+            .as_ref()
+            .map_or_else(Vec::new, |a| a.evidence.clone()),
         glyph: status_glyph(&node.status),
-        id: abbreviate(&node.id, parent).to_string(),
+        // Keep the canonical key on the row for search, details and copy.
+        // Tree drawing deliberately does not expose it.
+        id: node.id.clone(),
+        display_id: abbreviate(&node.id, _parent).to_string(),
         title: node.title.clone(),
         badges,
         progress,
         agent: node.agent.as_ref().map(agent_marker),
         agent_briefly: node.agent.as_ref().map(agent_briefly),
         watched: node.watching.is_watched(),
-        anomalies: node.anomalies.iter().map(phrase::anomaly).collect(),
+        anomalies,
         shut_over,
         notes,
         step: None,
@@ -464,6 +549,8 @@ mod tests {
 
     fn node(id: &str, status: Status) -> Node {
         Node {
+            activity: None,
+            disposable_fixture: false,
             project: "summit-works".to_string(),
             id: id.into(),
             title: "wallpaper timer calls dms".into(),

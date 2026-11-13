@@ -125,6 +125,14 @@ pub struct Forest {
     /// must finish first, and the list draws each bead once, so the bead
     /// names the row.
     unblocking: BTreeSet<BeadKey>,
+    /// Whether explicitly tagged disposable fixture trees are included.
+    show_fixtures: bool,
+    /// Whether finished branches are drawn individually instead of as runs.
+    show_completed: bool,
+    /// The last bead tree explicitly inspected, kept through refresh filtering.
+    pinned_root: Option<BeadKey>,
+    /// A selected bead that became closed during refresh remains visible until Home.
+    preserve_completed: Option<BeadKey>,
 }
 
 /// Flatten a snapshot into its lines.
@@ -149,6 +157,10 @@ pub fn flatten(snapshot: Snapshot) -> Forest {
         layout: row::Layout::default(),
         list: None,
         unblocking: BTreeSet::new(),
+        show_fixtures: false,
+        show_completed: false,
+        pinned_root: None,
+        preserve_completed: None,
     };
     forest.lay_out();
     forest.select_first_root();
@@ -172,6 +184,7 @@ impl Forest {
         if let Some(at) = first {
             self.selected = at;
             self.cursor = self.handle_at(at);
+            self.remember_inspected_tree(at);
         }
     }
 
@@ -182,6 +195,36 @@ impl Forest {
 
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
+    }
+
+    /// Number of distinct collected beads tagged as disposable fixtures.
+    pub fn hidden_fixture_count(&self) -> usize {
+        if self.show_fixtures {
+            return 0;
+        }
+        self.snapshot
+            .collected
+            .iter()
+            .flat_map(|tree| &tree.beads)
+            .filter(|bead| bead.disposable_fixture)
+            .map(|bead| (bead.project.clone(), bead.id.clone()))
+            .collect::<BTreeSet<_>>()
+            .len()
+    }
+
+    /// Compact current scope and completed/fixture visibility for the footer.
+    pub fn footer_state(&self) -> String {
+        let scope = match self.snapshot.filter {
+            Filter::CurrentWork => "Current",
+            Filter::LiveAgents => "Live",
+            Filter::Activity => "Activity",
+            Filter::History | Filter::All => "History",
+        };
+        format!(
+            "{scope} z{} x{}",
+            if self.show_completed { "+" } else { "-" },
+            self.hidden_fixture_count()
+        )
     }
 
     /// The first line the viewport is showing.
@@ -264,10 +307,26 @@ impl Forest {
         let ancestry = self.ancestry();
         let folded_over = self.folded_over();
         let out_of_focus = std::mem::take(&mut self.snapshot.out_of_focus);
+        if let Some(key) = self.cursor.as_ref().and_then(|handle| match handle {
+            Handle::Bead(place) => Some(place.key().clone()),
+            _ => None,
+        }) {
+            let closed = snapshot.collected.iter().any(|tree| {
+                tree.project == key.project
+                    && tree
+                        .beads
+                        .iter()
+                        .any(|bead| bead.is(&key) && bead.status.is_closed())
+            });
+            if closed {
+                self.preserve_completed = Some(key);
+            }
+        }
         // A collection carries the filter the command line asked for, which
         // is nobody's answer to `a`. So the one in hand goes on the new
         // snapshot, exactly as the folds and the cursor do.
         snapshot.refilter(self.snapshot.filter);
+        self.retain_inspected_root(&mut snapshot);
         self.take(snapshot);
         let focused = std::mem::take(&mut self.focused);
         self.focused = outermost(
@@ -405,6 +464,11 @@ impl Forest {
             &[],
             &[],
             &self.layout,
+            layout::Visibility {
+                fixtures: self.show_fixtures,
+                completed: self.show_completed,
+                preserve: self.preserve_completed.as_ref(),
+            },
         );
         let anywhere = arrived_anywhere(&spent);
         let mut reaching = Reaching::new(&anywhere);
@@ -585,6 +649,20 @@ impl Forest {
                 self.move_to(motion);
                 false
             }
+            Action::Home => {
+                self.focused.clear();
+                self.named.clear();
+                self.named_at_launch = false;
+                self.list = None;
+                self.unblocking.clear();
+                self.show_completed = false;
+                self.show_fixtures = false;
+                self.pinned_root = None;
+                self.preserve_completed = None;
+                self.snapshot.refilter(Filter::CurrentWork);
+                self.answer();
+                true
+            }
             Action::CollapseOrParent => self.collapse_or_parent(),
             Action::ExpandOrChild => self.expand_or_child(),
             Action::ToggleFold => {
@@ -638,6 +716,14 @@ impl Forest {
                 self.toggle_filter();
                 true
             }
+            Action::ToggleCompleted => {
+                self.show_completed = !self.show_completed;
+                true
+            }
+            Action::ToggleFixtures => {
+                self.show_fixtures = !self.show_fixtures;
+                true
+            }
             // Laid out as it switches, so there is nothing left to compare:
             // the list and the trees are never the same screen.
             Action::ToggleReadyList => {
@@ -651,6 +737,10 @@ impl Forest {
                 };
                 self.switch_to(next);
                 self.reveal();
+                return true;
+            }
+            Action::NextScope => {
+                self.next_scope();
                 return true;
             }
             Action::NextView => {
@@ -913,11 +1003,72 @@ impl Forest {
 
     fn toggle_filter(&mut self) {
         let next = match self.snapshot.filter {
-            Filter::LiveAgents => Filter::All,
             Filter::All => Filter::LiveAgents,
+            Filter::LiveAgents | Filter::CurrentWork | Filter::Activity | Filter::History => {
+                Filter::All
+            }
         };
         self.snapshot.refilter(next);
         self.answer();
+    }
+
+    fn next_scope(&mut self) {
+        let next = match self.snapshot.filter {
+            Filter::CurrentWork | Filter::LiveAgents => Filter::Activity,
+            Filter::Activity => Filter::History,
+            Filter::History | Filter::All => Filter::CurrentWork,
+        };
+        self.pinned_root = None;
+        self.focused.clear();
+        self.named.clear();
+        self.named_at_launch = false;
+        self.list = None;
+        self.snapshot.refilter(next);
+        self.answer();
+        self.lay_out();
+        self.reveal();
+    }
+
+    /// Keep the inspected root visible through refresh filtering until Home or
+    /// a scope switch explicitly resets the inspection.
+    fn retain_inspected_root(&self, snapshot: &mut Snapshot) {
+        if !matches!(snapshot.filter, Filter::CurrentWork | Filter::Activity) {
+            return;
+        }
+        let Some(root) = &self.pinned_root else {
+            return;
+        };
+        if snapshot
+            .trees
+            .iter()
+            .any(|tree| tree.project == root.project && tree.root == root.id)
+        {
+            return;
+        }
+        let Some(tree) = snapshot
+            .collected
+            .iter()
+            .find(|tree| tree.project == root.project && tree.root == root.id)
+            .cloned()
+        else {
+            return;
+        };
+        snapshot
+            .hidden_trees
+            .retain(|hidden| hidden.project != root.project || hidden.root != root.id);
+        snapshot.trees.push(tree);
+        let order: BTreeMap<(String, String), usize> = snapshot
+            .collected
+            .iter()
+            .enumerate()
+            .map(|(at, tree)| ((tree.project.clone(), tree.root.clone()), at))
+            .collect();
+        snapshot.trees.sort_by_key(|tree| {
+            order
+                .get(&(tree.project.clone(), tree.root.clone()))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
     }
 
     /// Take a snapshot as the one drawn.
@@ -1070,6 +1221,11 @@ impl Forest {
             &rooted,
             also,
             &self.layout,
+            layout::Visibility {
+                fixtures: self.show_fixtures,
+                completed: self.show_completed,
+                preserve: self.preserve_completed.as_ref(),
+            },
         )
     }
 
@@ -1131,22 +1287,84 @@ impl Forest {
 
     /// `h`: shut an open node, and step out of one already shut. Reports
     /// whether it shut one.
-    fn collapse_or_parent(&mut self) -> bool {
-        match (self.fold_at(self.selected), self.handle_at(self.selected)) {
-            (Some(true), Some(handle)) => {
-                self.point(handle, false);
-                true
-            }
-            _ => {
-                self.step_to(self.parent_of(self.selected));
-                false
-            }
-        }
+    fn parent_place(&self, place: &Place) -> Option<Place> {
+        let mut parent = place.clone();
+        parent.steps.pop()?;
+        Some(parent)
     }
 
-    /// `l`: open a shut node, and step into one already open. Reports
-    /// whether it opened one.
+    fn collapse_or_parent(&mut self) -> bool {
+        if (self.list.is_some() || !matches!(self.handle_at(self.selected), Some(Handle::Bead(_))))
+            && self.fold_at(self.selected) == Some(true)
+        {
+            if let Some(handle) = self.handle_at(self.selected) {
+                self.point(handle, false);
+                return true;
+            }
+        }
+        let selected = self.handle_at(self.selected);
+        if let Some(Handle::Bead(place)) = &selected {
+            if place.steps.is_empty()
+                && !self.focused.iter().any(|focused| focused == place)
+                && self
+                    .parent_of(self.selected)
+                    .is_some_and(|parent| matches!(self.lines[parent].content, Content::Project(_)))
+            {
+                return false;
+            }
+        }
+        // A focused tree root is drawn below its project header. That display
+        // parent is not the next scope: reveal the logical parent first.
+        if let Some(Handle::Bead(place)) = &selected {
+            if let Some(root) = self.focused.iter().find(|root| *root == place).cloned() {
+                if let Some(parent) = self.parent_place(&root) {
+                    self.focused = vec![parent];
+                } else {
+                    self.focused.clear();
+                }
+                self.answer();
+                self.cursor = Some(Handle::Bead(place.clone()));
+                return true;
+            }
+        }
+        if let Some(parent) = self.parent_of(self.selected) {
+            self.step_to(Some(parent));
+            return false;
+        }
+        let Some(Handle::Bead(place)) = selected else {
+            return false;
+        };
+        if let Some(root) = self
+            .focused
+            .iter()
+            .find(|root| at_or_beneath(&place, root))
+            .cloned()
+        {
+            if let Some(parent) = self.parent_place(&root) {
+                self.focused = vec![parent];
+            } else {
+                self.focused.clear();
+            }
+            self.answer();
+            self.cursor = Some(Handle::Bead(place));
+            return true;
+        }
+        false
+    }
+
+    /// Right focuses a selected bead. Summary rows and list rows keep their
+    /// own navigation: open a folded summary before stepping into its first row.
     fn expand_or_child(&mut self) -> bool {
+        if let Some(Handle::Bead(place)) = self.handle_at(self.selected) {
+            if self.list.is_none() {
+                self.named.clear();
+                self.named_at_launch = false;
+                self.focused = vec![place.clone()];
+                self.answer();
+                self.cursor = Some(Handle::Bead(place));
+                return true;
+            }
+        }
         match (self.fold_at(self.selected), self.handle_at(self.selected)) {
             (Some(false), Some(handle)) => {
                 self.point(handle, true);
@@ -1254,6 +1472,7 @@ impl Forest {
     fn select_place(&mut self, place: &Place) -> bool {
         let handle = self.handle_on(place);
         self.cursor = Some(handle.clone());
+        self.pinned_root = Some(place.tree.clone());
         self.lay_out();
         self.reveal();
         self.cursor == Some(handle)
@@ -1634,6 +1853,13 @@ impl Forest {
         if let Some(target) = target {
             self.selected = target;
             self.cursor = self.handle_at(target);
+            self.remember_inspected_tree(target);
+        }
+    }
+
+    fn remember_inspected_tree(&mut self, at: usize) {
+        if let Some(place) = self.lines.get(at).and_then(|line| line.place.as_ref()) {
+            self.pinned_root = Some(place.tree.clone());
         }
     }
 
@@ -1697,12 +1923,25 @@ impl Forest {
         }
         self.settle_cursor();
         let rooted = self.rooted();
-        let drawn = layout::lay_out(
-            &self.snapshot,
+        let mut view = self.snapshot.clone();
+        if !self.show_fixtures {
+            view.trees.retain(|tree| {
+                tree.tracker != TrackerState::Ok
+                    || tree.beads.is_empty()
+                    || tree.beads.iter().any(|bead| !bead.disposable_fixture)
+            });
+        }
+        let drawn = layout::lay_out_preserving(
+            &view,
             &self.facts,
             &self.folds,
             &rooted,
             &self.layout,
+            layout::Visibility {
+                fixtures: self.show_fixtures,
+                completed: self.show_completed,
+                preserve: self.preserve_completed.as_ref(),
+            },
         );
         let was = std::mem::replace(&mut self.lines, drawn);
         if self.find_cursor().is_none() {

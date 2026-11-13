@@ -1,4 +1,4 @@
-//! `v` opens each view the config names in turn, and each lists the beads its
+//! `V` opens each view the config names in turn, and each lists the beads its
 //! conditions select and none of the others.
 
 mod terminal;
@@ -74,7 +74,7 @@ fn each_view_opens_in_turn_and_lists_only_what_it_selects() {
         ("to sign · 1", "ark-12.1", ["ark-12.2", "ark-12.3"]),
         ("urgent work · 1", "ark-12.3", ["ark-12.1", "ark-12.2"]),
     ] {
-        let screen = after_pressing(&mut bdi, b"v", &mut rows);
+        let screen = after_pressing(&mut bdi, b"V", &mut rows);
         let drawn = |said: &str| contains(&screen, said.as_bytes());
         let what_bdi_drew =
             || format!("{:?}\n{}", String::from_utf8_lossy(&screen), bdi.timeline());

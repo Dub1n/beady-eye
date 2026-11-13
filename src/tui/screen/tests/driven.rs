@@ -38,7 +38,7 @@ const THE_DESCRIBED_SUBTREE: &str =
 /// The keys that open that tree and leave the selection on its header: every
 /// tree rather than only the staffed ones, since no pane sits on it, back to
 /// the first row, down onto the tree, open it, and back up and down again.
-const OPEN_THE_TREE: &str = "agjlgj";
+const OPEN_THE_TREE: &str = "agj gj";
 
 /// The tree's header, which is where that walk leaves the selection.
 const THE_TREE: &str = "dun-0tp";

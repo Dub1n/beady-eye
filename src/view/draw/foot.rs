@@ -130,7 +130,9 @@ pub(super) fn status_bar(
         .collect();
 
     if notices.is_empty() {
-        return Fitted::new(vec![Span::raw(fullest(keys, width))], Vec::new(), answer)
+        let answer_width = columns(&answer);
+        let room = width.saturating_sub(answer_width + if answer_width > 0 { GAP } else { 0 });
+        return Fitted::new(vec![Span::raw(fullest(keys, room))], Vec::new(), answer)
             .state_or_nothing();
     }
 

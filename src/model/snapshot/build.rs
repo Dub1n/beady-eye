@@ -131,6 +131,11 @@ pub fn build_tree(
                     .any(|orphan| orphan.id == *id && orphan.why.is_unread())
             });
             Node {
+                activity: None,
+                disposable_fixture: cfg
+                    .fixture_filters
+                    .get(own)
+                    .is_some_and(|filter| filter.matches(bead)),
                 project: own.to_string(),
                 id: bead.id.clone(),
                 title: bead.title.clone(),

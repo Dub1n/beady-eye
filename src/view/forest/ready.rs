@@ -16,8 +16,8 @@ use crate::model::snapshot::{Counts, Node as Bead, Snapshot, TrackerState, Tree}
 use crate::model::tree::numeric_id_order;
 use crate::model::types::{Edge, Status};
 use crate::view::lines::{
-    links_below, marker, root_key, upward_prefix, Content, Line, Note, Place, ProjectLine, Section,
-    Waiting, INDENT,
+    links_below, marker_with, root_key, upward_prefix_with, Content, Line, Note, Place,
+    ProjectLine, Section, Waiting, INDENT,
 };
 use crate::view::row::{self, Step};
 
@@ -86,6 +86,7 @@ pub(super) fn lay_out(
     let up = Up {
         snapshot,
         facts,
+        layout,
         waiters: waiters(snapshot),
     };
     for (section, beads) in sections {
@@ -99,7 +100,7 @@ pub(super) fn lay_out(
             if !up.waiting_on(&from).is_empty() {
                 let open = unblocking.contains(&from[0]);
                 line.folded = Some(open);
-                line.prefix = marker(open).to_string();
+                line.prefix = marker_with(open, layout.ascii).to_string();
                 if open {
                     let steps = up.steps_above(&from, &[], &mut BTreeSet::new());
                     return Node::drawn(line, steps);
@@ -327,6 +328,7 @@ fn waiters(snapshot: &Snapshot) -> BTreeMap<BeadKey, Vec<(&Bead, &Edge)>> {
 struct Up<'a> {
     snapshot: &'a Snapshot,
     facts: &'a Facts,
+    layout: &'a row::Layout,
     waiters: BTreeMap<BeadKey, Vec<(&'a Bead, &'a Edge)>>,
 }
 
@@ -377,7 +379,13 @@ impl<'a> Up<'a> {
                 unblocks_as_above: !first && !self.waiting_on(&stepped).is_empty(),
             });
             let line = Line {
-                prefix: upward_prefix(trunk, last, edge),
+                prefix: upward_prefix_with(
+                    trunk,
+                    last,
+                    edge,
+                    self.layout.indent,
+                    self.layout.ascii,
+                ),
                 depth: trunk.len() as u16 + 2,
                 folded: None,
                 place: self.place_of(&bead.key()),

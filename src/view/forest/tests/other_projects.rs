@@ -516,3 +516,18 @@ fn another_projects_bead_keeps_its_whole_id_under_a_bead_its_id_runs_on_from() {
 
     assert_eq!(row_of(&forest, "hbr-1.1").id, "hbr-1.1");
 }
+
+/// Compact rows qualify a dependency copied from another project's tree.
+#[test]
+fn compact_foreign_rows_name_their_owning_project() {
+    let mut forest = flatten_compact(harbour_waiting_on_dunwich());
+    forest.apply(Action::ExpandForest);
+    let foreign = forest.lines().iter().find_map(|line| match &line.content {
+        Content::Bead(row) if row.title.starts_with("[dunwich] ") => Some(&row.title),
+        _ => None,
+    });
+    assert_eq!(
+        foreign,
+        Some(&"[dunwich] lift the ground station".to_string())
+    );
+}

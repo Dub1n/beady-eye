@@ -828,6 +828,19 @@ fn snapshot() -> Snapshot {
     built(Filter::LiveAgents)
 }
 
+/// Existing structural snapshots assert the historical four-cell tree head.
+/// Keep those assertions explicit while production uses compact defaults.
+fn flatten(snapshot: Snapshot) -> Forest {
+    let mut forest = crate::view::forest::flatten(snapshot);
+    forest.laid_out_to(crate::view::row::Layout::legacy());
+    forest
+}
+
+/// A fresh forest using the compact production default for new behavior tests.
+fn flatten_compact(snapshot: Snapshot) -> Forest {
+    crate::view::forest::flatten(snapshot)
+}
+
 /// One line as its prefix plus enough of its content to read the shape.
 fn sketch(forest: &Forest) -> Vec<String> {
     forest
@@ -845,7 +858,7 @@ fn said(content: &Content) -> String {
             format!("⚠ {} gone", absent.root)
         }
         Content::Absent(absent) => format!("⚠ {} unread", absent.root),
-        Content::Bead(row) => format!("{} {} {}", row.glyph, row.id, row.title),
+        Content::Bead(row) => format!("{} {} {}", row.glyph, row.display_id, row.title),
         Content::Elided { count, .. } => format!("… {count} more"),
         Content::Orphaned(orphaned) => format!("⚠ {} {:?}", orphaned.id, orphaned.why),
         Content::Note(note) => format!("! {note:?}"),
@@ -868,7 +881,7 @@ fn said(content: &Content) -> String {
             let mut said = format!(
                 "{} {} {} · {}",
                 row.glyph,
-                row.id,
+                row.display_id,
                 row.title,
                 phrase::also_waits_on(step.also_waits_on)
             );

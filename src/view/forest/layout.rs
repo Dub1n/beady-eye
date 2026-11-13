@@ -24,8 +24,8 @@ use crate::model::tree::{Link, OrphanedDependency};
 use crate::model::types::Edge;
 use crate::view::draw::identity_widths;
 use crate::view::lines::{
-    links_below, marker, notes_of, prefix, root_key, way_below, BeadFacts, Content, Group,
-    GroupKind, Item, Line, Note, Place, ProjectLine, Unread, INDENT,
+    links_below, marker_with, notes_of, prefix_with, root_key, way_below, BeadFacts, Content,
+    Group, GroupKind, Item, Line, Note, Place, ProjectLine, Unread, INDENT,
 };
 use crate::view::row::{self, Shut, Widths};
 
@@ -68,14 +68,63 @@ fn shut_over(bead: &BeadFacts, folded: Option<bool>) -> Option<Shut> {
 /// Every line the snapshot draws, in render order. `facts` is what the
 /// snapshot answered when the forest took it, and `row` is what each bead's
 /// row is drawn by.
+#[cfg(test)]
 pub(super) fn lay_out(
     snapshot: &Snapshot,
     facts: &Arc<Facts>,
     folds: &Folds,
     rooted: &[Rooted],
     row: &row::Layout,
+    show_fixtures: bool,
+    show_completed: bool,
 ) -> Drawn {
-    Layout::new(snapshot, facts, folds, rooted, false, &[], row).draw()
+    lay_out_preserving(
+        snapshot,
+        facts,
+        folds,
+        rooted,
+        row,
+        Visibility {
+            fixtures: show_fixtures,
+            completed: show_completed,
+            preserve: None,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Visibility<'a> {
+    pub fixtures: bool,
+    pub completed: bool,
+    pub preserve: Option<&'a BeadKey>,
+}
+
+pub(super) fn lay_out_preserving(
+    snapshot: &Snapshot,
+    facts: &Arc<Facts>,
+    folds: &Folds,
+    rooted: &[Rooted],
+    row: &row::Layout,
+    visibility: Visibility<'_>,
+) -> Drawn {
+    let Visibility {
+        fixtures: show_fixtures,
+        completed: show_completed,
+        preserve: preserve_completed,
+    } = visibility;
+    Layout::new(
+        snapshot,
+        facts,
+        folds,
+        rooted,
+        false,
+        &[],
+        row,
+        show_fixtures,
+        show_completed,
+        preserve_completed,
+    )
+    .draw()
 }
 
 /// Every line the snapshot draws as one `Vec`, for a test to read whole.
@@ -86,10 +135,18 @@ pub(super) fn draw(
     folds: &Folds,
     rooted: &[Rooted],
 ) -> Vec<Line> {
-    lay_out(snapshot, facts, folds, rooted, &row::Layout::default())
-        .iter()
-        .cloned()
-        .collect()
+    lay_out(
+        snapshot,
+        facts,
+        folds,
+        rooted,
+        &row::Layout::legacy(),
+        false,
+        false,
+    )
+    .iter()
+    .cloned()
+    .collect()
 }
 
 /// Every line the snapshot draws and every line a shut fold hides, each fold
@@ -106,8 +163,21 @@ pub(super) fn draw_beneath_every_fold(
     rooted: &[Rooted],
     also: &[Handle],
     row: &row::Layout,
+    visibility: Visibility<'_>,
 ) -> Drawn {
-    Layout::new(snapshot, facts, folds, rooted, true, also, row).draw()
+    Layout::new(
+        snapshot,
+        facts,
+        folds,
+        rooted,
+        true,
+        also,
+        row,
+        visibility.fixtures,
+        visibility.completed,
+        visibility.preserve,
+    )
+    .draw()
 }
 
 #[cfg(test)]
@@ -404,11 +474,26 @@ struct Layout<'a> {
     /// What each bead's row is drawn by, which says which cells a subtree
     /// left undrawn is measured over.
     row: &'a row::Layout,
+    show_fixtures: bool,
+    show_completed: bool,
+    preserve_completed: Option<&'a BeadKey>,
     named: Named,
     kept: RefCell<Kept>,
 }
 
 impl<'a> Layout<'a> {
+    fn visibility(&self) -> Visibility<'_> {
+        Visibility {
+            fixtures: self.show_fixtures,
+            completed: self.show_completed,
+            preserve: self.preserve_completed,
+        }
+    }
+
+    fn prefix(&self, trunk: &[bool], last: bool, shut: bool, edge: Option<&Edge>) -> String {
+        prefix_with(trunk, last, shut, edge, self.row.indent, self.row.ascii)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new(
         snapshot: &'a Snapshot,
@@ -418,6 +503,9 @@ impl<'a> Layout<'a> {
         beneath_shut: bool,
         also: &[Handle],
         row: &'a row::Layout,
+        show_fixtures: bool,
+        show_completed: bool,
+        preserve_completed: Option<&'a BeadKey>,
     ) -> Self {
         Layout {
             snapshot,
@@ -426,6 +514,9 @@ impl<'a> Layout<'a> {
             rooted,
             beneath_shut,
             row,
+            show_fixtures,
+            show_completed,
+            preserve_completed,
             named: Named::of(folds.mentioned().chain(facts.beginnings()).chain(also)),
             kept: RefCell::default(),
         }
@@ -460,6 +551,10 @@ impl<'a> Layout<'a> {
                 beads: kept.beads,
                 runs: kept.runs,
                 beneath_shut: self.beneath_shut,
+                row: self.row.clone(),
+                show_fixtures: self.show_fixtures,
+                show_completed: self.show_completed,
+                preserve_completed: self.preserve_completed.cloned(),
             }),
             self.row,
         )
@@ -531,7 +626,7 @@ impl<'a> Layout<'a> {
         let over = self.folds.beneath(&handle, None);
 
         let line = Line {
-            prefix: marker(open).to_string(),
+            prefix: marker_with(open, self.row.ascii).to_string(),
             depth: 0,
             folded: Some(open),
             place: None,
@@ -583,7 +678,7 @@ impl<'a> Layout<'a> {
                 Root::Tree(tree, rooted) => self
                     .tree_layout(tree, over, false, rooted)
                     .draw(&mut trunk, entries == 0),
-                Root::Absent(place, why) => absent(place, why, &trunk, entries == 0),
+                Root::Absent(place, why) => absent(place, why, &trunk, entries == 0, self.row),
             });
         }
         for group in groups {
@@ -613,9 +708,9 @@ impl<'a> Layout<'a> {
         let open = pointed.unwrap_or(group.kind.live());
         let over = self.folds.beneath(&handle, over);
         let prefix = if trunk.is_empty() && group.project.is_none() {
-            marker(open).to_string()
+            marker_with(open, self.row.ascii).to_string()
         } else {
-            prefix(trunk, last, !open, None)
+            self.prefix(trunk, last, !open, None)
         };
         let depth = trunk.len() as u16 + u16::from(group.project.is_some());
         let kind = group.kind;
@@ -663,7 +758,7 @@ impl<'a> Layout<'a> {
             .map(|(n, item)| {
                 Node::drawn(
                     Line {
-                        prefix: prefix(trunk, n + 1 == count, false, None),
+                        prefix: self.prefix(trunk, n + 1 == count, false, None),
                         depth,
                         folded: None,
                         place: None,
@@ -694,7 +789,7 @@ impl<'a> Layout<'a> {
             tree,
             answers,
             self.beneath_shut,
-            self.row,
+            (self.row, self.visibility()),
             counted,
         )
     }
@@ -754,7 +849,7 @@ impl<'a> TreeLayout<'a> {
             // one a reader most needs to see is there.
             return Node::drawn(
                 Line {
-                    prefix: prefix(trunk, last, false, None),
+                    prefix: self.layout.prefix(trunk, last, false, None),
                     depth,
                     folded: None,
                     place: Some(root),
@@ -773,7 +868,12 @@ impl<'a> TreeLayout<'a> {
         let bead = self.facts.bead(self.tree, at, above);
         let handle = Handle::Bead(root.clone());
         let pointed = folds.pointed(&handle, over);
-        let open = !kids.is_empty() && pointed.unwrap_or(!self.rests_shut && bead.opens_a_fold);
+        let inspected = self
+            .layout
+            .preserve_completed
+            .is_some_and(|key| root.key() == key);
+        let open = !kids.is_empty()
+            && (inspected || pointed.unwrap_or(!self.rests_shut && bead.opens_a_fold));
         let below = folds.beneath(&handle, over);
 
         let folded = (!kids.is_empty()).then_some(open);
@@ -787,6 +887,10 @@ impl<'a> TreeLayout<'a> {
             None,
             folded,
             &bead,
+            self.layout.row,
+            self.layout.show_fixtures,
+            self.layout.show_completed,
+            node.disposable_fixture && self.has_product_descendant(at, above),
         );
 
         let mut entries: Vec<Child> = notes_of(self.tree).into_iter().map(Child::Note).collect();
@@ -882,7 +986,7 @@ impl<'a> TreeLayout<'a> {
             match entry {
                 Child::Note(note) => drawn.push(Node::drawn(
                     Line {
-                        prefix: prefix(trunk, last, false, None),
+                        prefix: self.layout.prefix(trunk, last, false, None),
                         depth,
                         folded: None,
                         place: None,
@@ -891,7 +995,7 @@ impl<'a> TreeLayout<'a> {
                     Vec::new(),
                 )),
                 Child::Orphaned(orphaned) => {
-                    drawn.push(orphaned_node(orphaned, trunk, last, depth));
+                    drawn.push(orphaned_node(orphaned, trunk, last, depth, self.layout.row));
                 }
                 Child::Elided(members) => {
                     let handle = Handle::Elided(parent.clone());
@@ -906,6 +1010,7 @@ impl<'a> TreeLayout<'a> {
                         last,
                         depth,
                         open,
+                        self.layout.row,
                     );
                     let mut children = Vec::new();
                     if open || self.layout.beneath_shut {
@@ -979,7 +1084,11 @@ impl<'a> TreeLayout<'a> {
         // branch with none rests as one line, its glyph, its fraction and its
         // marker saying what it holds.
         let pointed = folds.pointed(&handle, over);
-        let open = !kids.is_empty() && pointed.unwrap_or(stand.rests_open(&bead));
+        let inspected = self
+            .layout
+            .preserve_completed
+            .is_some_and(|key| place.key() == key);
+        let open = !kids.is_empty() && (inspected || pointed.unwrap_or(stand.rests_open(&bead)));
         let below = folds.beneath(&handle, over);
         let folded = (!kids.is_empty()).then_some(open);
         let line = bead_line(
@@ -992,6 +1101,10 @@ impl<'a> TreeLayout<'a> {
             Some(&link.edge),
             folded,
             &bead,
+            self.layout.row,
+            self.layout.show_fixtures,
+            self.layout.show_completed,
+            node.disposable_fixture && self.has_product_descendant(at, above),
         );
         let mut children = Vec::new();
         if open || self.layout.beneath_shut {
@@ -1017,6 +1130,7 @@ impl<'a> TreeLayout<'a> {
         last: bool,
         depth: u16,
     ) -> Node {
+        let node = &self.tree.beads[link.bead];
         let counted = Counted {
             tree: self.index,
             at: link.bead,
@@ -1035,14 +1149,36 @@ impl<'a> TreeLayout<'a> {
             trunk,
             last,
             depth,
+            self.layout.row,
+            self.layout.visibility(),
+            node.disposable_fixture && self.has_product_descendant(link.bead, &[]),
         )
     }
 
     /// A node's children as they are drawn: the ones worth a line each, the
     /// blockers no tracker holds, then one line for the run that is not
     /// worth a line.
+    fn has_product_descendant(&self, at: usize, above: &[usize]) -> bool {
+        let mut path = above.to_vec();
+        path.push(at);
+        links_below(self.tree, at, above).into_iter().any(|link| {
+            !self.tree.beads[link.bead].disposable_fixture
+                || self.has_product_descendant(link.bead, &path)
+        })
+    }
+
+    /// Keep a closed branch only when it provides a path to work still in
+    /// progress. A user inspected selection is handled separately by the
+    /// forest's pinned selection path.
     fn children_entries<'b>(&'b self, at: usize, above: &[usize]) -> Vec<Child<'b>> {
-        let (drawn, elided) = self.facts.split(self.tree, at, above);
+        let (drawn, elided) = filtered_children(
+            self.tree,
+            at,
+            above,
+            self.facts.split(self.tree, at, above),
+            self.layout.row.compact,
+            self.layout.visibility(),
+        );
         let mut entries: Vec<Child> = drawn.into_iter().map(Child::Node).collect();
         entries.extend(
             self.tree.beads[at]
@@ -1058,10 +1194,23 @@ impl<'a> TreeLayout<'a> {
 }
 
 /// The line saying why a blocker is not drawn, where it would have hung.
-fn orphaned_node(orphaned: &OrphanedDependency, trunk: &[bool], last: bool, depth: u16) -> Node {
+fn orphaned_node(
+    orphaned: &OrphanedDependency,
+    trunk: &[bool],
+    last: bool,
+    depth: u16,
+    row: &row::Layout,
+) -> Node {
     Node::drawn(
         Line {
-            prefix: prefix(trunk, last, false, Some(&Edge::Blocks)),
+            prefix: prefix_with(
+                trunk,
+                last,
+                false,
+                Some(&Edge::Blocks),
+                row.indent,
+                row.ascii,
+            ),
             depth,
             folded: None,
             place: None,
@@ -1072,10 +1221,16 @@ fn orphaned_node(orphaned: &OrphanedDependency, trunk: &[bool], last: bool, dept
 }
 
 /// The line saying why a focused bead has no row, where its row would be.
-fn absent(place: &Place, why: &TrackerState, trunk: &[bool], last: bool) -> Node {
+fn absent(
+    place: &Place,
+    why: &TrackerState,
+    trunk: &[bool],
+    last: bool,
+    row: &row::Layout,
+) -> Node {
     Node::drawn(
         Line {
-            prefix: prefix(trunk, last, false, None),
+            prefix: prefix_with(trunk, last, false, None, row.indent, row.ascii),
             depth: trunk.len() as u16 + 1,
             folded: None,
             place: Some(place.clone()),
@@ -1100,20 +1255,57 @@ fn bead_line(
     edge: Option<&Edge>,
     folded: Option<bool>,
     bead: &BeadFacts,
+    row: &row::Layout,
+    show_fixtures: bool,
+    _show_completed: bool,
+    fixture_context: bool,
 ) -> Line {
+    let mut content = row::cells(
+        node,
+        parent
+            .filter(|parent| parent.project == node.project)
+            .map(|parent| parent.id.as_str()),
+        bead.progress,
+        shut_over(bead, folded),
+    );
+    if row.compact && node.project != place.tree.project {
+        content.title = format!("[{}] {}", node.project, content.title);
+    }
+    if node.disposable_fixture && !show_fixtures {
+        content.title = if fixture_context {
+            "[fixture context]".into()
+        } else {
+            content.display_id.clear();
+            "[fixture hidden]".into()
+        };
+        content.badges.clear();
+        content.progress = None;
+        content.agent = None;
+        content.agent_briefly = None;
+        content.watched = false;
+        content.anomalies.clear();
+        content.shut_over = None;
+        content.notes.clear();
+        content.activity = None;
+        content.activity_model = None;
+        content.activity_state = None;
+        content.activity_fresh = None;
+        content.activity_evidence.clear();
+        content.step = None;
+    }
     Line {
-        prefix: prefix(trunk, last, folded == Some(false), edge),
+        prefix: prefix_with(
+            trunk,
+            last,
+            folded == Some(false),
+            edge,
+            row.indent,
+            row.ascii,
+        ),
         depth,
         folded,
         place: Some(place),
-        content: Content::Bead(row::cells(
-            node,
-            parent
-                .filter(|parent| parent.project == node.project)
-                .map(|parent| parent.id.as_str()),
-            bead.progress,
-            shut_over(bead, folded),
-        )),
+        content: Content::Bead(content),
     }
 }
 
@@ -1125,9 +1317,10 @@ fn run_line(
     last: bool,
     depth: u16,
     open: bool,
+    row: &row::Layout,
 ) -> Line {
     Line {
-        prefix: prefix(trunk, last, !open, None),
+        prefix: prefix_with(trunk, last, !open, None, row.indent, row.ascii),
         depth,
         folded: Some(open),
         place: None,
@@ -1146,7 +1339,7 @@ fn count(
     tree: &Tree,
     answers: Uniform,
     beneath_shut: bool,
-    row: &row::Layout,
+    presentation: (&row::Layout, Visibility<'_>),
     counted: Counted,
 ) -> Count {
     if let Some(count) = kept.beads.get(&counted) {
@@ -1155,10 +1348,21 @@ fn count(
     let Counted {
         at, stand, forced, ..
     } = counted;
-    let (drawn, elided) = answers.split(tree, at);
+    let (row, visibility) = presentation;
+    let (drawn, elided) = filtered_children(
+        tree,
+        at,
+        &[],
+        answers.split(tree, at),
+        row.compact,
+        visibility,
+    );
     let orphaned = tree.beads[at].orphaned_dependencies.len();
     let kids = !drawn.is_empty() || !elided.is_empty() || orphaned > 0;
-    let open = kids && forced.unwrap_or(stand.rests_open(answers.bead(at)));
+    let inspected = visibility
+        .preserve
+        .is_some_and(|key| tree.beads[at].is(key));
+    let open = kids && (inspected || forced.unwrap_or(stand.rests_open(answers.bead(at))));
     let mut total = Count {
         rows: 1,
         widths: Widths::default(),
@@ -1172,7 +1376,7 @@ fn count(
                 tree,
                 answers,
                 beneath_shut,
-                row,
+                presentation,
                 counted,
                 link,
             ));
@@ -1183,7 +1387,7 @@ fn count(
                 tree,
                 answers,
                 beneath_shut,
-                row,
+                presentation,
                 counted,
                 &elided,
             ));
@@ -1199,7 +1403,7 @@ fn count_run(
     tree: &Tree,
     answers: Uniform,
     beneath_shut: bool,
-    row: &row::Layout,
+    presentation: (&row::Layout, Visibility<'_>),
     under: Counted,
     members: &[&Link],
 ) -> Count {
@@ -1219,7 +1423,7 @@ fn count_run(
                 tree,
                 answers,
                 beneath_shut,
-                row,
+                presentation,
                 under,
                 link,
             ));
@@ -1240,7 +1444,7 @@ fn count_child(
     tree: &Tree,
     answers: Uniform,
     beneath_shut: bool,
-    row: &row::Layout,
+    presentation: (&row::Layout, Visibility<'_>),
     parent: Counted,
     link: &Link,
 ) -> Count {
@@ -1249,7 +1453,7 @@ fn count_child(
         stand: parent.stand.beneath(parent.at, link, answers.chosen()),
         ..parent
     };
-    let mut count = count(kept, tree, answers, beneath_shut, row, child);
+    let mut count = count(kept, tree, answers, beneath_shut, presentation, child);
     let facts = answers.bead(link.bead);
     let own = row::cells(
         &tree.beads[link.bead],
@@ -1257,7 +1461,7 @@ fn count_child(
         facts.progress,
         shut_over(facts, Some(!count.shut)),
     );
-    count.widths.merge(&identity_widths(&own, row));
+    count.widths.merge(&identity_widths(&own, presentation.0));
     count
 }
 
@@ -1282,14 +1486,26 @@ fn undrawn_node(
     trunk: &[bool],
     last: bool,
     depth: u16,
+    row: &row::Layout,
+    visibility: Visibility<'_>,
+    fixture_context: bool,
 ) -> Node {
     let at = link.bead;
     let node = &tree.beads[at];
     let place = parent.step_to(node.key());
-    let kids = !node.orphaned_dependencies.is_empty() || !links_below(tree, at, &[]).is_empty();
+    let (drawn, elided) = filtered_children(
+        tree,
+        at,
+        &[],
+        answers.split(tree, at),
+        row.compact,
+        visibility,
+    );
+    let kids = !node.orphaned_dependencies.is_empty() || !drawn.is_empty() || !elided.is_empty();
     let bead = answers.bead(at);
     let rests_open = counted.stand.rests_open(bead);
-    let open = kids && counted.forced.unwrap_or(rests_open);
+    let inspected = visibility.preserve.is_some_and(|key| node.is(key));
+    let open = kids && (inspected || counted.forced.unwrap_or(rests_open));
     let folded = kids.then_some(open);
     let line = bead_line(
         node,
@@ -1301,6 +1517,10 @@ fn undrawn_node(
         Some(&link.edge),
         folded,
         bead,
+        row,
+        visibility.fixtures,
+        visibility.completed,
+        fixture_context,
     );
     let beneath = if open || beneath_shut {
         Beneath::Bead(Undrawn {
@@ -1329,7 +1549,14 @@ pub(super) fn beneath_bead(ground: &Ground, node: &Node, undrawn: &Undrawn) -> V
     let counted = undrawn.counted;
     let (tree, answers) = ground_of(ground, &counted);
     let parent = node.line.place.as_ref().expect("a bead's line has a place");
-    let (drawn, elided) = answers.split(tree, counted.at);
+    let (drawn, elided) = filtered_children(
+        tree,
+        counted.at,
+        &[],
+        answers.split(tree, counted.at),
+        ground.row.compact,
+        ground_visibility(ground),
+    );
     let orphaned = &tree.beads[counted.at].orphaned_dependencies;
     let count = drawn.len() + orphaned.len() + usize::from(!elided.is_empty());
     let depth = node.line.depth + 1;
@@ -1352,7 +1579,7 @@ pub(super) fn beneath_bead(ground: &Ground, node: &Node, undrawn: &Undrawn) -> V
         .collect();
     children.extend(orphaned.iter().enumerate().map(|(n, orphaned)| {
         let last = drawn.len() + n + 1 == count;
-        orphaned_node(orphaned, &undrawn.trunk, last, depth)
+        orphaned_node(orphaned, &undrawn.trunk, last, depth, &ground.row)
     }));
     if !elided.is_empty() {
         let open = counted.forced.unwrap_or(false);
@@ -1361,13 +1588,15 @@ pub(super) fn beneath_bead(ground: &Ground, node: &Node, undrawn: &Undrawn) -> V
             .get(&counted)
             .expect("a run beneath a counted bead was counted with it")
             .rows;
+        let count = answers.run(counted.at);
         let line = run_line(
             parent,
-            answers.run(counted.at),
+            count,
             &undrawn.trunk,
             true,
             depth,
             open,
+            &ground.row,
         );
         let beneath = if open || ground.beneath_shut {
             Beneath::Run(Undrawn {
@@ -1382,6 +1611,99 @@ pub(super) fn beneath_bead(ground: &Ground, node: &Node, undrawn: &Undrawn) -> V
     children
 }
 
+fn ground_visibility(ground: &Ground) -> Visibility<'_> {
+    Visibility {
+        fixtures: ground.show_fixtures,
+        completed: ground.show_completed,
+        preserve: ground.preserve_completed.as_ref(),
+    }
+}
+
+fn child_visible(
+    tree: &Tree,
+    at: usize,
+    above: &[usize],
+    compact: bool,
+    visibility: Visibility<'_>,
+) -> bool {
+    let bead = &tree.beads[at];
+    let fixture =
+        visibility.fixtures || !bead.disposable_fixture || descendant_product(tree, at, above);
+    let complete = !compact
+        || visibility.completed
+        || !bead.status.is_finished()
+        || descendant_unfinished(tree, at, above)
+        || descendant_preserved(tree, at, above, visibility.preserve);
+    fixture && complete
+}
+
+/// Counting, eager layout and lazy materialization use the same child sequence.
+fn filtered_children<'a>(
+    tree: &'a Tree,
+    at: usize,
+    above: &[usize],
+    split: (Vec<&'a Link>, Vec<&'a Link>),
+    compact: bool,
+    visibility: Visibility<'_>,
+) -> (Vec<&'a Link>, Vec<&'a Link>) {
+    let (mut drawn, mut elided) = if visibility.completed {
+        (links_below(tree, at, above), Vec::new())
+    } else {
+        split
+    };
+    let path = with(at, above);
+    if compact && !visibility.completed {
+        let mut remaining = Vec::new();
+        for link in elided {
+            if descendant_unfinished(tree, link.bead, &path)
+                || descendant_preserved(tree, link.bead, &path, visibility.preserve)
+                || (tree.beads[link.bead].disposable_fixture
+                    && descendant_product(tree, link.bead, &path))
+            {
+                drawn.push(link);
+            } else {
+                remaining.push(link);
+            }
+        }
+        elided = remaining;
+    }
+    drawn.retain(|link| child_visible(tree, link.bead, &path, compact, visibility));
+    elided.retain(|link| child_visible(tree, link.bead, &path, compact, visibility));
+    (drawn, elided)
+}
+
+fn with(at: usize, above: &[usize]) -> Vec<usize> {
+    let mut path = above.to_vec();
+    path.push(at);
+    path
+}
+
+fn descendant_unfinished(tree: &Tree, at: usize, above: &[usize]) -> bool {
+    let path = with(at, above);
+    links_below(tree, at, above).into_iter().any(|link| {
+        !tree.beads[link.bead].status.is_finished() || descendant_unfinished(tree, link.bead, &path)
+    })
+}
+
+fn descendant_preserved(
+    tree: &Tree,
+    at: usize,
+    above: &[usize],
+    preserve: Option<&BeadKey>,
+) -> bool {
+    let Some(preserve) = preserve else {
+        return false;
+    };
+    let bead = &tree.beads[at];
+    if bead.is(preserve) {
+        return true;
+    }
+    let path = with(at, above);
+    links_below(tree, at, above)
+        .into_iter()
+        .any(|link| descendant_preserved(tree, link.bead, &path, Some(preserve)))
+}
+
 /// The members of a run nothing drew, drawn now.
 pub(super) fn beneath_run(ground: &Ground, node: &Node, undrawn: &Undrawn) -> Vec<Node> {
     let counted = undrawn.counted;
@@ -1389,7 +1711,14 @@ pub(super) fn beneath_run(ground: &Ground, node: &Node, undrawn: &Undrawn) -> Ve
     let Content::Elided { under, .. } = &node.line.content else {
         return Vec::new();
     };
-    let (_, members) = answers.split(tree, counted.at);
+    let (_, members) = filtered_children(
+        tree,
+        counted.at,
+        &[],
+        answers.split(tree, counted.at),
+        ground.row.compact,
+        ground_visibility(ground),
+    );
     let count = members.len();
     let depth = node.line.depth + 1;
     members
@@ -1445,7 +1774,22 @@ fn children_of(
         trunk,
         last,
         depth,
+        &ground.row,
+        ground_visibility(ground),
+        (tree.beads[link.bead].disposable_fixture
+            && descendant_product(tree, link.bead, &[parent.at]))
+            || ground
+                .preserve_completed
+                .as_ref()
+                .is_some_and(|key| tree.beads[link.bead].is(key)),
     )
+}
+
+fn descendant_product(tree: &Tree, at: usize, above: &[usize]) -> bool {
+    let path = with(at, above);
+    links_below(tree, at, above).into_iter().any(|link| {
+        !tree.beads[link.bead].disposable_fixture || descendant_product(tree, link.bead, &path)
+    })
 }
 
 impl Layout<'_> {

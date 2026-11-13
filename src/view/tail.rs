@@ -309,6 +309,8 @@ mod tests {
 
     fn node(id: &str, agent: Option<AgentRef>) -> Node {
         Node {
+            activity: None,
+            disposable_fixture: false,
             project: "dunwich".to_string(),
             id: id.to_string(),
             title: "a bead in the tree".to_string(),

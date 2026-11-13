@@ -1,4 +1,4 @@
-# beady-eye
+# beady-eye — passive OmO fork
 
 ![A screen-printed cosmic-horror poster: a colossal eye with a red pupil hangs in a green-black sky, tentacles trailing away behind it, while a line of small robots below hauls a chain of glowing beads under its gaze.](docs/images/beady-eye-hero.png)
 
@@ -51,76 +51,26 @@ gates whose wait is over. `bdi bd` is the way back. Whatever showed a person
 the bead passes on their answer, deferral or comment, and `bdi bd` writes it
 to the bead. Writing back, below, has both.
 
-## Summoning
+## Installing this fork
 
-Homebrew fetches a built binary, for macOS and Linux on Intel and arm64:
+This fork adds compact bracket markers, ID-free tree rows, focus navigation,
+Current work / Activity / History views, and optional passive OmO task correlation.
+It requires no extra agent reporting commands. See
+[the fork guide](docs/passive-activity.md) for configuration, state meanings and
+source limitations, and [the agreed design](INTENDED-CHANGES.md) for the full scope.
 
-```console
-$ brew install codeforbreakfast/tap/bdi
+```sh
+herdr plugin install Dub1n/beady-eye
 ```
 
-crates.io, if you would rather compile it yourself:
+Installation builds the fork with Rust 1.88+. Bind the Herdr action
+`dub1n.beady-eye.open` to a free command key. For standalone use:
 
-```console
-$ cargo install beady-eye
+```sh
+cargo install --git https://github.com/Dub1n/beady-eye --locked
 ```
 
-herdr, as a plugin that fetches the released binary for your platform:
-
-```console
-$ herdr plugin install CodeForBreakfast/beady-eye
-```
-
-That puts nothing on screen by itself, because herdr has no command palette.
-Bind a key to the plugin's action in `~/.config/herdr/config.toml`, and that
-key opens the eye in a split beside the focused pane, on that pane's project:
-
-```toml
-[[keys.command]]
-key = "prefix+i"
-type = "plugin_action"
-command = "codeforbreakfast.beady-eye.open"
-```
-
-The plugin keeps its `bdi` to itself. To run `bdi` anywhere else, install it
-another way as well.
-
-Nix, with flakes on, builds the tip of `main`. The flake serves Linux on
-Intel and arm64, and macOS on Apple silicon. An Intel Mac takes the Homebrew
-or release binary instead:
-
-```console
-$ nix run github:CodeForBreakfast/beady-eye
-```
-
-From your own flake, pin a release tag and take the package or the overlay:
-
-```nix
-inputs.beady-eye.url = "github:CodeForBreakfast/beady-eye/v0.40.0";
-
-beady-eye.packages.${system}.default                # the package
-nixpkgs.overlays = [ beady-eye.overlays.default ];  # pkgs.beady-eye
-```
-
-Each release's x86_64 Linux build is pushed to a Cachix cache, so with the
-cache in your `nix.settings` neither of those compiles anything:
-
-```nix
-substituters = [ "https://codeforbreakfast.cachix.org" ];
-trusted-public-keys = [ "codeforbreakfast.cachix.org-1:W96fHCqTzLZ7Vj2TKMMRLOkWzUn7N3LxKyBuF255XKg=" ];
-```
-
-Both are built against this flake's own nixpkgs, which is what the cache
-holds. `pkgs.beady-eye-rebuilt` through the overlay builds bdi against your
-nixpkgs instead, and compiles.
-
-Or take a binary from the [latest release](https://github.com/CodeForBreakfast/beady-eye/releases/latest).
-There is one per platform with a `.sha256` beside it, and the Linux ones are
-static. Rename it `bdi` and put it on your `PATH`. Apple has not been asked to
-sign it, so a copy a browser downloaded needs
-`xattr -d com.apple.quarantine bdi` before macOS will let it open its eye.
-
-The crate is `beady-eye`. The command is `bdi`.
+Upstream Homebrew/crates.io/release binaries do not contain the fork changes.
 
 ## Opening the eye
 
@@ -139,13 +89,17 @@ Keys to start with. `?` lists the lot.
 | key | does |
 |---|---|
 | `↑` `↓` `j` `k` | move |
-| `←` `→` `h` `l` | collapse or expand; again to move to the parent or first child |
+| `←` `h` / `→` `l` | select/reveal the parent / focus the selected subtree |
+| Space | collapse or expand |
+| Home | restore Current work |
 | `Enter` | open the bead, and from there, focus its pane |
 | `f` | focus the selected bead's pane |
-| `a` | every tree, not only the ones with a live agent |
+| `z` | toggle completed beads within scope |
+| `a` | legacy all/live-agent root filter |
+| `x` | toggle configured disposable fixtures |
 | `F` | only the selected bead and the work beneath it; again for the whole forest |
 | `r` | the ready list in place of the forest, or in a view only its ready beads; again to undo |
-| `v` | the next view your config names, keeping `r` on; past the last, the forest or the ready list |
+| `v` / `V` | cycle Current work, Activity, History / configured custom views |
 | `/` `n` `N` | search ids and titles |
 | `y` | copy the bead id (OSC 52, so it survives ssh and a multiplexer) |
 | `^R` | read the trackers again now |
@@ -188,6 +142,12 @@ and a ready bead whose pull request has merged is listed `delivered`, to close
 rather than start. Each names its `pull_requests`.
 
 ## Being seen
+
+For passive OmO correlation, follow [the fork guide](docs/passive-activity.md).
+It reads existing attempt and task records without the registration commands
+below. The following upstream pane-claim convention remains optional for other
+integrations.
+
 
 The eye draws only what it can find. An agent that wants to be found tells
 the bead which pane it is in. One that does not still toils, but toils among

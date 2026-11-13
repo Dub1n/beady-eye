@@ -66,11 +66,11 @@ pub enum Notch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Move(Motion),
-    /// Collapse the selected node, or move to its parent when it is already
-    /// collapsed.
+    /// Restore the default current-work forest and leave focused scopes.
+    Home,
+    /// Move to the parent, or reveal the containing level at the focused root.
     CollapseOrParent,
-    /// Expand the selected node, or move to its first child when it is already
-    /// expanded.
+    /// Focus the selected bead as the sole displayed root, retaining selection.
     ExpandOrChild,
     ToggleFold,
     /// Expand the selected node and everything under it, at every depth.
@@ -95,6 +95,10 @@ pub enum Action {
     CycleSpineForest,
     /// Show every tree, rather than only those with a live agent.
     ToggleFilter,
+    /// Show completed beads within the current root scope.
+    ToggleCompleted,
+    /// Show or hide records tagged as disposable fixtures.
+    ToggleFixtures,
     /// Draw the ready list in place of the forest, or put the forest back.
     /// In a view, list only its ready beads, or all of them again.
     ToggleReadyList,
@@ -102,6 +106,8 @@ pub enum Action {
     /// the forest back after the last, or the ready list where only ready
     /// beads are listed.
     NextView,
+    /// Cycle CurrentWork, Activity, and History.
+    NextScope,
     /// Hide the tail and give its rows to the forest, or bring it back.
     ToggleTail,
     /// Focus the selected bead's pane in herdr.
