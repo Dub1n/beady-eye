@@ -39,7 +39,7 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
     std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
     let source = serde_json::json!([
         {"id":"ark-root","title":"Gateway","status":"in_progress","priority":1,"issue_type":"epic"},
-        {"id":"ark-root.1","title":"Check gateway","parent":"ark-root", "dependencies":[{"depends_on_id":"ark-root","type":"parent-child"}], "status":"in_progress","priority":2,"issue_type":"task","metadata":{"qrclipWork":{"attempt":{"id":"invented-attempt","coordinator":"invented-coordinator","mode":"delegate"}},"qrclipDispatch":{"attemptId":"invented-attempt","taskId":"st_invented","nativeStatus":"running"}}},
+        {"id":"ark-root.1","title":"Check gateway","parent":"ark-root", "dependencies":[{"depends_on_id":"ark-root","type":"parent-child"}], "status":"in_progress","priority":2,"issue_type":"task","metadata":{"qrclipWork":{"attempt":{"id":"invented-attempt","coordinator":"invented-coordinator","mode":"delegate"}},"qrclipDispatch":{"attemptId":"invented-attempt","taskId":"st_invented","childSession":"invented-child","nativeStatus":"running"}}},
         {"id":"ark-old","title":"Earlier work","status":"closed","priority":2,"issue_type":"task"}
     ]);
     let trackers = Fakes::default().with(

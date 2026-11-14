@@ -281,10 +281,11 @@ Dispatch receipts describe admission time. A receipt saying running does not
 outweigh a matching native task that has ended. A configured readiness object must name the current attempt and explicitly
 record readiness; a bare old boolean cannot establish `[A]`. Multiple receipts
 for one bead retain their worker identities and aggregate their states.
-Current-attempt validation,
-source freshness and identity conflict checks prevent an unrelated or old task
-from taking over a bead's display. Completed records remain historical terminal
-evidence rather than becoming executing work merely because a file is touched.
+Current-attempt validation, an explicitly pinned child, source freshness and
+identity conflict checks qualify task evidence. They cannot guarantee that an
+upstream provider never reuses identities. Completed records remain historical
+terminal evidence rather than becoming executing work merely because a file is
+touched.
 
 Activity follows snapshot refresh cadence (Ctrl-R refreshes now). The configured
 poll interval is a gap after a collection completes, not a latency guarantee.
@@ -382,13 +383,13 @@ task_directory = "/srv/arkham/tasks"
 session_directory = "/srv/arkham/sessions"
 ```
 
-A current explicit attempt establishes ownership. A native task's recorded model
-remains authoritative. When missing, the adapter follows its worker session ID
-into the native task's sibling `children/<task-id>/sessions/<task-id>` directory.
-A missing worker ID is recoverable only if that exact directory contains one
-unambiguous session file whose filename and v3 header agree. Direct work can
-use its coordinator session identity. Models come from structured native task records or model-change events in
-linked sessions; when unavailable, the viewer shows an unknown model or session ID. One agent may own multiple beads. Explicit native bead, project or
+A current explicit attempt establishes ownership. A verified, explicitly pinned
+worker session can supply its model from the native task or its own sibling
+`children/<task-id>/sessions/<task-id>` session directory. The adapter does not
+discover an unpinned child from that directory and attribute it to the bead.
+Direct work can use its coordinator session identity. Models come from structured
+native task records or model-change events in linked sessions; when unavailable,
+the viewer shows an unknown model or session ID. One agent may own multiple beads. Explicit native bead, project or
 attempt mismatches remain conflicts; archived attempts do not become current.
 
 Session identity verification reads the header only. Model lookup scans linked
@@ -501,11 +502,42 @@ stream projection, and a short expiry forces a fresh snapshot. Where the
 connection or credential is unavailable, the existing task evidence remains;
 unknown never means inactive. The transport is not supported on other platforms.
 
+The attempt must independently name the same coordinator as the native task's
+parent. Stream eligibility is scoped to the project and full bead ID. If the
+receipt has no child session, the task file's child alone is not enough to
+establish which child the dispatch originally named: a task can be replaced or
+continued. Its task status, model and child cannot establish execution,
+completion or readiness for that bead. Details say when this link is missing. A disagreement with an
+explicit child is a conflict. Connection diagnostics distinguish what the
+transport can establish about discovery, credentials, authentication, identity,
+protocol and disconnection without displaying credentials or peer messages.
+
 OmO's session lineage and task identity do not independently name a Beads
 bead. Direct-owner work therefore remains unknown without an explicit current
 attempt-to-task link and matching execution evidence. The native DAG history
 and task projections may contain prompt or progress content and are not used
 to infer bead assignments.
+
+### Read-only work-record diagnostic
+
+The fork includes a separate Python diagnostic for exported Beads rows. For an
+invented project, run `bd --sandbox list --json | python3
+tools/work-record-diagnostic.py --project orchard`; add `--task-dir` with that
+project's configured native task directory to inspect referenced task records.
+It reads standard input and optional task files only; it never calls Beads or
+writes tracker data. Raw Beads rows need the explicit project because IDs alone
+do not identify a project. Input is limited to 4 MiB and 1,000 rows, each task
+record to 128 KiB. The task-file reader requires POSIX no-follow directory and
+file operations.
+
+The JSON distinguishes direct attempts, missing or historical receipts,
+transitional states, partial records and explicit identity conflicts. A child
+seen in a task record is labelled an **unverified observation**, not a bead
+assignment or current execution. Flat receipt arrays and `tasks` collections
+are examined per worker, with duplicate or malformed identities reported as
+ambiguous. Missing records stay unavailable. It neither
+reads prompt text for attribution nor claims liveness, execution or acceptance.
+Output contains identifiers and should be treated as private local data.
 
 ### Worker identity and observed history
 

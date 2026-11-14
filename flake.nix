@@ -4335,6 +4335,14 @@ and a second line"
           clippy = checkOf "clippy" artifacts.dev [ pkgs.clippy ] "cargo clippy --all-targets -- -D warnings";
           conventional-subject-test = conventionalSubjectTest;
 
+          work-record-diagnostic = pkgs.runCommand "work-record-diagnostic-test"
+            { nativeBuildInputs = [ pkgs.python3 ]; } ''
+            cd ${sourceOf [ ./tools/work-record-diagnostic.py ./tests/work_record_diagnostic_test.py ]}
+            export PYTHONDONTWRITEBYTECODE=1
+            python3 -m unittest discover -s tests -p work_record_diagnostic_test.py
+            touch $out
+          '';
+
           # A second invocation rather than a flag on the one above, because
           # `--all-targets` is what defeats it: building the test targets pulls
           # in the dev-dependencies, which turns `testing` on, which makes the

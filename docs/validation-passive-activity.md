@@ -4,6 +4,34 @@ This report separates invented automated inputs from live local checks. Neither
 kind of viewer check establishes that an agent's product changes work or that a
 bead has been accepted.
 
+## Orchestrator evidence follow-up, 14 November 2026
+
+The final locked Cargo suite passed 2,852 tests with 3 ignored across 44
+reported targets. Both all-target and non-test Clippy with warnings denied,
+Cargo formatting, `git diff --check`, and `cargo package --locked --allow-dirty`
+passed. The separate Python diagnostic passed 18 invented-data tests. Its Nix
+check is defined in `flake.nix`; Nix was unavailable locally, so the full flake
+and its additional scans were not locally verified. The independent Sol source
+review found no blocking issue after the correlation and diagnostic corrections.
+
+The terminal suite includes a real application-loop PTY test using invented
+records: a childless receipt stays unknown and cannot acquire a model,
+completion or acceptance from a task file, even with a passing check. This is
+not a user-pane or live-worker test.
+
+A read-only real tracker comparison found 42 in-progress rows at that instant:
+14 direct attempts and 28 childless delegated receipts. Thirteen referenced
+native task files were readable and 15 unavailable in the configured store;
+the diagnostic reported the readable children only as unverified observations.
+The numbers can change and do not establish that the workers were executing.
+
+An isolated temporary OmO 5.1.69 host authenticated the actual stream module
+and returned an empty status-only snapshot. No worker events or complete viewer
+path were exercised there. The user's registered host was unavailable when
+inspected, so authenticated operation against that host is still unverified.
+The canonical `sh herdr/build.sh` installed the tested release binary; no user
+pane was restarted or controlled. Non-Linux live transport remains unverified.
+
 ## Check results
 
 - `cargo test --locked --no-fail-fast`: 2,753 passed, zero failed,
