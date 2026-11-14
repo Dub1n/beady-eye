@@ -148,7 +148,7 @@ ascii = false
 show_ids = false
 compact = true
 colour_brackets = true # false: normal text colour for [ and ], status colour inside
-root_indent = "never" # "single-tree" or "always" removes the project-to-bead step
+hide_root_indent = "never" # "single-tree" or "always" removes the project-to-bead step
 search_mode = "jump" # "filter" keeps matches and their ancestor context
 sticky_headers = "active" # "all" pins hidden project headings at both ends; "off" uses dots
 preview_min_height = 6 # content rows, excluding the divider; clamped to leave a bead row
@@ -337,7 +337,16 @@ root actions as Ctrl+Space and Backspace. The terminal must forward mouse events
 and the Ctrl modifier. Sticky project headings are clickable; overflow dots and
 the status legend are not bead rows.
 
-`root_indent = "single-tree"` removes the project-to-bead indent when exactly one
+`hide_root_indent` names the act of hiding: `"always"` always removes the
+project-level indentation, `"never"` keeps it, and `"single-tree"` removes it only
+with one displayed project. The former `root_indent` key remains an alias with
+its original meaning; existing configurations are not inverted. Use one spelling,
+not both. The same rule applies to bead rows, project groups (including trees
+with no live agent and unclaimed panes), their children, unread roots, notes and
+completed runs. Project groups retain their own expand/collapse marker; global
+groups retain their own hierarchy.
+
+`hide_root_indent = "single-tree"` removes the project-to-bead indent when exactly one
 project tree is displayed; `"always"` does so for every project. `"never"` keeps
 it. Root bead markers then align with the project dropdown column; deeper
 trunks still descend from the centre of their parent's marker. This affects

@@ -295,14 +295,7 @@ pub fn draw(
     let widths = lines.widths();
     let reads = Reads::new(&forest.snapshot().read_at, collecting, lapsed, now);
 
-    let mut layout = layout.clone();
-    if layout.root_indent == crate::view::row::RootIndent::SingleTree {
-        layout.root_indent = if lines.project_headers().len() == 1 {
-            crate::view::row::RootIndent::Always
-        } else {
-            crate::view::row::RootIndent::Never
-        };
-    }
+    let layout = resolved_layout(layout, lines.project_headers().len());
     let rows = visible_rows(forest, &layout, height);
     for (row, visible) in rows.iter().enumerate() {
         let area = Rect {
@@ -380,6 +373,19 @@ fn prompt_cursor(query: &Query, row: Rect) -> Position {
     }
 }
 
+/// Resolve project-count-dependent indentation once for every row type.
+fn resolved_layout(layout: &Layout, projects: usize) -> Layout {
+    let mut layout = layout.clone();
+    if layout.root_indent == crate::view::row::RootIndent::SingleTree {
+        layout.root_indent = if projects == 1 {
+            crate::view::row::RootIndent::Always
+        } else {
+            crate::view::row::RootIndent::Never
+        };
+    }
+    layout
+}
+
 /// One line of the forest, whatever kind it is.
 pub(super) fn fitted(
     line: &lines::Line,
@@ -387,38 +393,48 @@ pub(super) fn fitted(
     layout: &Layout,
     reads: &Reads,
 ) -> Fitted {
-    match &line.content {
-        Content::Project(project) => {
-            project_line(project, &line.prefix, reads.of(project), reads.now)
+    // Only the project level is removed. Global groups keep their own tree.
+    let hide = layout.compact && layout.root_indent == crate::view::row::RootIndent::Always;
+    let under_project = match &line.content {
+        Content::Project(_) | Content::Scoped { .. } | Content::Section { .. } => false,
+        Content::Group(group) => group.project.is_some(),
+        Content::Item(item) => matches!(item, lines::Item::Loose(_)),
+        _ => true,
+    };
+    let prefix = if hide && under_project {
+        if matches!(&line.content, Content::Group(_)) && line.depth == 1 {
+            format!(
+                "{} ",
+                lines::marker_with(line.folded.unwrap_or(true), layout.ascii)
+            )
+        } else {
+            line.prefix
+                .chars()
+                .skip(2 + usize::from(layout.indent))
+                .collect()
         }
-        Content::Unread(unread) => unread_line(unread, &line.prefix, widths.of(&Cell::Id)),
-        Content::Absent(absent) => absent_line(absent, &line.prefix, widths.of(&Cell::Id)),
+    } else {
+        line.prefix.clone()
+    };
+    match &line.content {
+        Content::Project(project) => project_line(project, &prefix, reads.of(project), reads.now),
+        Content::Unread(unread) => unread_line(unread, &prefix, widths.of(&Cell::Id)),
+        Content::Absent(absent) => absent_line(absent, &prefix, widths.of(&Cell::Id)),
         Content::Bead(row) | Content::Waiting(Waiting { row, .. }) => {
-            let prefix =
-                if layout.compact && layout.root_indent == crate::view::row::RootIndent::Always {
-                    line.prefix
-                        .chars()
-                        .skip(2 + usize::from(layout.indent))
-                        .collect::<String>()
-                } else {
-                    line.prefix.clone()
-                };
             bead_line(row, &prefix, widths, layout)
         }
-        Content::Elided { count, .. } => elided_run(&line.prefix, *count),
-        Content::Orphaned(orphaned) => orphaned_line(orphaned, &line.prefix, widths.of(&Cell::Id)),
+        Content::Elided { count, .. } => elided_run(&prefix, *count),
+        Content::Orphaned(orphaned) => orphaned_line(orphaned, &prefix, widths.of(&Cell::Id)),
         Content::Note(note) => {
             let (said, style) = finding(*note);
-            sentence(&line.prefix, said, style)
+            sentence(&prefix, said, style)
         }
-        Content::Group(group) => group_line(&line.prefix, group),
-        Content::Item(item) => item_line(&line.prefix, item),
-        Content::Scoped { project } => scoped_line(&line.prefix, project),
-        Content::Section { section, count } => sentence(
-            &line.prefix,
-            phrase::section(section, *count),
-            palette::HEADING,
-        ),
+        Content::Group(group) => group_line(&prefix, group),
+        Content::Item(item) => item_line(&prefix, item),
+        Content::Scoped { project } => scoped_line(&prefix, project),
+        Content::Section { section, count } => {
+            sentence(&prefix, phrase::section(section, *count), palette::HEADING)
+        }
     }
 }
 
@@ -1436,6 +1452,121 @@ mod compact_controls {
         .rows()
         .remove(0);
         assert_eq!(child.chars().nth(1), Some('├'), "{child}");
+    }
+
+    #[test]
+    fn root_indent_policy_covers_groups_panes_and_other_project_rows() {
+        use crate::view::lines::{Group, GroupKind, Item};
+        for ascii in [false, true] {
+            for indent in [1, 2, 3, 16] {
+                for (mode, projects, hidden) in [
+                    (RootIndent::Never, 1, false),
+                    (RootIndent::Always, 1, true),
+                    (RootIndent::Always, 2, true),
+                    (RootIndent::SingleTree, 1, true),
+                    (RootIndent::SingleTree, 2, false),
+                ] {
+                    let layout = resolved_layout(
+                        &Layout {
+                            root_indent: mode,
+                            ascii,
+                            indent,
+                            ..Layout::default()
+                        },
+                        projects,
+                    );
+                    for kind in [GroupKind::HiddenTrees, GroupKind::Unattributed] {
+                        for open in [false, true] {
+                            let line = lines::Line {
+                                prefix: lines::prefix_for_layout(&[], true, !open, None, &layout),
+                                depth: 1,
+                                folded: Some(open),
+                                place: None,
+                                content: Content::Group(Group {
+                                    kind,
+                                    project: Some("summit-works".into()),
+                                    count: 3,
+                                    with_findings: 0,
+                                }),
+                            };
+                            let text = Painted::of(
+                                fitted(&line, &Widths::default(), &layout, &at_rest()),
+                                100,
+                                1,
+                            )
+                            .rows()
+                            .remove(0);
+                            if hidden {
+                                assert!(
+                                    text.starts_with(lines::marker_with(open, ascii)),
+                                    "{mode:?}: {text}"
+                                );
+                            } else {
+                                assert!(text.starts_with("  "), "{mode:?}: {text}");
+                            }
+                        }
+                    }
+                    let prefix = lines::prefix_for_layout(&[false], true, false, None, &layout);
+                    for content in [
+                        Content::Item(Item::Loose(pane("w:p2", PaneStatus::Working))),
+                        Content::Note(Note::Cycle(1)),
+                        Content::Elided {
+                            count: 3,
+                            under: lines::Place::root(lines::root_key(&grove(1))),
+                        },
+                    ] {
+                        let line = lines::Line {
+                            prefix: prefix.clone(),
+                            depth: 2,
+                            folded: None,
+                            place: None,
+                            content,
+                        };
+                        let text = Painted::of(
+                            fitted(&line, &Widths::default(), &layout, &at_rest()),
+                            100,
+                            1,
+                        )
+                        .rows()
+                        .remove(0);
+                        let branch = if ascii { '+' } else { '└' };
+                        assert_eq!(
+                            text.find(branch).map(|at| text[..at].chars().count()),
+                            Some(if hidden {
+                                1
+                            } else {
+                                2 + usize::from(indent) + 1
+                            }),
+                            "{mode:?}: {text}"
+                        );
+                    }
+                    let global = lines::Line {
+                        prefix: "  + ".into(),
+                        depth: 1,
+                        folded: None,
+                        place: None,
+                        content: Content::Item(Item::Unconfigured(
+                            crate::model::snapshot::UnconfiguredPane {
+                                pane: pane("w:p3", PaneStatus::Idle).pane,
+                                cwd: "/srv/invented/elsewhere".into(),
+                                pane_status: PaneStatus::Idle,
+                            },
+                        )),
+                    };
+                    let text = Painted::of(
+                        fitted(&global, &Widths::default(), &layout, &at_rest()),
+                        100,
+                        1,
+                    )
+                    .rows()
+                    .remove(0);
+                    assert!(
+                        text.starts_with("  + "),
+                        "global group child must retain its own indentation: {text}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

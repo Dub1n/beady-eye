@@ -221,6 +221,16 @@ Unicode/ASCII, ready/dependency rows and changing visibility on refresh. Preserv
 canonical paths and clickable row identity when cropping prefixes.
 
 
+**Root-group correction (0.43.1):** Root indentation suppression now uses the same
+presentation prefix for bead rows, project groups, unclaimed panes, notes, unread
+roots and completed runs. Project group fold controls are preserved; global
+sections keep their independent hierarchy. The canonical config key is
+`hide_root_indent`, with `root_indent` retained as an alias without reversing
+old values. For proposal 3, extract the shared prefix rule and config migration
+together; test always/single-tree/never across project counts, ASCII/Unicode,
+connector widths and expanded/collapsed groups, including global-group children.
+Keep model paths, source snapshots and click row geometry unchanged.
+
 ## 4. Preserve useful titles in narrow tree panes
 
 **Priority:** strong practical benefit; likely more extraction work than its name suggests.
