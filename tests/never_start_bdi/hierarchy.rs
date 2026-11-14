@@ -193,3 +193,80 @@ fn setting_root_inside_a_focused_tree_is_idempotent_and_survives_view_switches()
     viewer.apply(Action::ToggleDependencies);
     assert_eq!(viewer.focused_on(), [child].into());
 }
+
+#[test]
+fn parent_root_reveals_one_level_without_moving_the_selected_bead() {
+    let mut viewer = forest::flatten(source());
+    let parent = beady_eye::model::join::BeadKey {
+        project: "arkham".into(),
+        id: "ark-1".into(),
+    };
+    let child = beady_eye::model::join::BeadKey {
+        project: "arkham".into(),
+        id: "ark-1.1".into(),
+    };
+    assert!(
+        !viewer.apply(Action::RootUp),
+        "home has no enclosing focused root"
+    );
+    assert!(viewer.go_to(&child));
+    viewer.apply(Action::RootSelected);
+    assert!(viewer.apply(Action::RootUp));
+    assert_eq!(viewer.focused_on(), [parent].into());
+    assert_eq!(viewer.lines()[viewer.selected_line()].bead(), Some(&child));
+    assert!(viewer.apply(Action::RootUp));
+    assert!(viewer.focused_on().is_empty());
+    assert_eq!(viewer.lines()[viewer.selected_line()].bead(), Some(&child));
+}
+
+#[test]
+fn parent_root_requests_ancestry_after_a_collection_only_retained_the_focused_subtree() {
+    let complete = source();
+    let parent = beady_eye::model::join::BeadKey {
+        project: "arkham".into(),
+        id: "ark-1".into(),
+    };
+    let child = beady_eye::model::join::BeadKey {
+        project: "arkham".into(),
+        id: "ark-1.1".into(),
+    };
+    let node = complete
+        .collected
+        .iter()
+        .flat_map(|tree| &tree.beads)
+        .find(|node| node.key() == child)
+        .unwrap()
+        .clone();
+    let mut partial = complete.clone();
+    partial.collected = vec![Arc::new(Tree {
+        project: child.project.clone(),
+        root: child.id.clone(),
+        title: node.title.clone(),
+        counts: beady_eye::model::snapshot::Counts::over(std::slice::from_ref(&node)),
+        tracker: TrackerState::Ok,
+        beads: vec![node],
+        children: vec![vec![]],
+        orphaned_dependencies: vec![],
+        cycles: vec![],
+    })];
+    partial.refilter(Filter::All);
+    let mut viewer = forest::flatten(complete.clone());
+    assert!(viewer.go_to(&child));
+    viewer.apply(Action::RootSelected);
+    viewer.refresh(partial);
+    assert_eq!(viewer.focused_on(), [child.clone()].into());
+    assert_eq!(
+        viewer.lines()[viewer.selected_line()].bead(),
+        Some(&child),
+        "a focused refresh keeps the bead selected"
+    );
+    viewer.apply(Action::RootUp);
+    assert_eq!(
+        viewer.focused_on(),
+        [parent.clone()].into(),
+        "request the parent that the next collection must build"
+    );
+    viewer.refresh(complete);
+    assert_eq!(viewer.focused_on(), [parent].into());
+    assert_eq!(viewer.lines()[viewer.selected_line()].bead(), Some(&child));
+}

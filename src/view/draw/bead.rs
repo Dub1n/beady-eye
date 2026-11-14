@@ -94,7 +94,7 @@ pub(super) fn bead_line(row: &Row, prefix: &str, widths: &Widths, layout: &Layou
         .linking(links)
         .shortening(shorter);
     if layout.compact {
-        fitted = fitted.compact_tree(layout.indent);
+        fitted = fitted.compact_tree(layout.indent.saturating_add(1));
     }
     if layout.state.contains(&Cell::Agent) {
         if let Some(briefly) = &row.agent_briefly {
@@ -492,6 +492,50 @@ mod tests {
     use crate::view::painted::{self, Run};
 
     #[test]
+    fn nested_branches_and_verticals_align_with_the_parent_status_character() {
+        for ascii in [false, true] {
+            for indent in [1, 2, 3, 4, 16] {
+                for colour_brackets in [false, true] {
+                    let layout = Layout {
+                        indent,
+                        ascii,
+                        colour_brackets,
+                        ..Layout::default()
+                    };
+                    let row = row(&node("ark-1", "Example", Status::Closed));
+                    let mut centres = Vec::new();
+                    for depth in 0..6 {
+                        let prefix = crate::view::lines::prefix_for_layout(
+                            &vec![true; depth],
+                            false,
+                            false,
+                            None,
+                            &layout,
+                        );
+                        let mut buffer = Buffer::empty(Rect::new(0, 0, 512, 1));
+                        bead_line(&row, &prefix, &Widths::default(), &layout)
+                            .render(buffer.area, &mut buffer);
+                        let marker = (0..512).find(|x| buffer[(*x, 0)].symbol() == "[").unwrap();
+                        if let Some(parent) = centres.last() {
+                            assert_eq!(
+                                buffer[(*parent, 0)].symbol(),
+                                if ascii { "+" } else { "├" }
+                            );
+                            for ancestor in &centres[..centres.len() - 1] {
+                                assert_eq!(
+                                    buffer[(*ancestor, 0)].symbol(),
+                                    if ascii { "|" } else { "│" }
+                                );
+                            }
+                        }
+                        centres.push(marker + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compact_branches_touch_markers_without_changing_fold_alignment() {
         for ascii in [false, true] {
             for indent in [1, 2, 3, 4] {
@@ -502,13 +546,12 @@ mod tests {
                         indent,
                         ..Layout::default()
                     };
-                    let prefix = crate::view::lines::prefix_with(
+                    let prefix = crate::view::lines::prefix_for_layout(
                         &[true],
                         false,
                         folded,
                         None,
-                        indent,
-                        ascii,
+                        &layout,
                     );
                     let row = row(&node("ark-1", "Example", Status::InProgress));
                     let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 1));

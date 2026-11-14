@@ -103,6 +103,8 @@ pub enum Action {
     ToggleDependencies,
     /// Make the selected bead the root, including inside an existing scope.
     RootSelected,
+    /// Reveal one containing root level while keeping the selected bead.
+    RootUp,
     /// Draw the ready list in place of the forest, or put the forest back.
     /// In a view, list only its ready beads, or all of them again.
     ToggleReadyList,

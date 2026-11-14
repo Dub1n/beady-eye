@@ -24,7 +24,7 @@ use crate::model::tree::{Link, OrphanedDependency};
 use crate::model::types::Edge;
 use crate::view::draw::identity_widths;
 use crate::view::lines::{
-    links_below, marker_with, notes_of, prefix_with, root_key, way_below, BeadFacts, Content,
+    links_below, marker_with, notes_of, prefix_for_layout, root_key, way_below, BeadFacts, Content,
     Group, GroupKind, Item, Line, Note, Place, ProjectLine, Unread, INDENT,
 };
 use crate::view::row::{self, Shut, Widths};
@@ -491,7 +491,7 @@ impl<'a> Layout<'a> {
     }
 
     fn prefix(&self, trunk: &[bool], last: bool, shut: bool, edge: Option<&Edge>) -> String {
-        prefix_with(trunk, last, shut, edge, self.row.indent, self.row.ascii)
+        prefix_for_layout(trunk, last, shut, edge, self.row)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1203,14 +1203,7 @@ fn orphaned_node(
 ) -> Node {
     Node::drawn(
         Line {
-            prefix: prefix_with(
-                trunk,
-                last,
-                false,
-                Some(&Edge::Blocks),
-                row.indent,
-                row.ascii,
-            ),
+            prefix: prefix_for_layout(trunk, last, false, Some(&Edge::Blocks), row),
             depth,
             folded: None,
             place: None,
@@ -1230,7 +1223,7 @@ fn absent(
 ) -> Node {
     Node::drawn(
         Line {
-            prefix: prefix_with(trunk, last, false, None, row.indent, row.ascii),
+            prefix: prefix_for_layout(trunk, last, false, None, row),
             depth: trunk.len() as u16 + 1,
             folded: None,
             place: Some(place.clone()),
@@ -1294,14 +1287,7 @@ fn bead_line(
         content.step = None;
     }
     Line {
-        prefix: prefix_with(
-            trunk,
-            last,
-            folded == Some(false),
-            edge,
-            row.indent,
-            row.ascii,
-        ),
+        prefix: prefix_for_layout(trunk, last, folded == Some(false), edge, row),
         depth,
         folded,
         place: Some(place),
@@ -1320,7 +1306,7 @@ fn run_line(
     row: &row::Layout,
 ) -> Line {
     Line {
-        prefix: prefix_with(trunk, last, !open, None, row.indent, row.ascii),
+        prefix: prefix_for_layout(trunk, last, !open, None, row),
         depth,
         folded: Some(open),
         place: None,

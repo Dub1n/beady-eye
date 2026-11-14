@@ -94,7 +94,8 @@ Keys to start with. `?` lists the lot.
 | Ctrl+Space | set the selected root |
 | F | focus / restore the forest |
 | b | switch ownership tree / dependency graph |
-| Home | restore Current work |
+| Home / H | restore Current work |
+| Backspace | reveal the displayed root’s parent level |
 | `f` | focus the selected bead's pane |
 | `z` | toggle completed beads within scope |
 | `a` | legacy all/live-agent root filter |

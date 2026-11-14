@@ -148,3 +148,33 @@ The real terminal test checks both settings at 30/40/60/80 columns, including
 status descriptions, details and copying. No tracker or workflow changes are made.
 
 Full Cargo validation: 2,768 passed, zero failed, 3 ignored across 44 reported targets. Both Clippy modes, formatting, source scans, package verification and release build passed. The installed binary reports 0.42.1 and matches the canonical release build; no fresh live Herdr-pane or macOS/Nix coverage is claimed.
+
+## 0.42.2 marker-centred trunks and parent-root navigation
+
+Compact nested trunks descend from the centre character of the parent marker.
+The first project trunk remains fixed; each nested level adds one alignment
+cell. Buffer tests verify six levels with ASCII/Unicode connectors, both bracket
+colour modes and connector widths 1, 2, 3, 4 and 16. Prefix cropping uses the same
+full-level step.
+
+H aliases Home and can leave details/bindings for the default forest. Backspace
+reveals one containing root level without changing the selected bead or active
+scope. The highest root returns to the surrounding forest; an unfocused view is
+a no-op. Search Backspace remains a query edit. Invented collection tests cover
+both immediately available ancestry and a focused refresh that omitted the
+parent, including preserving bead identity when its rendered path changes.
+The real terminal test covers Backspace after entering a lower root and H from
+details. Parent reads use the existing collector; no tracker mutation or agent
+reporting is introduced.
+
+Follow-up validation: all 2,771 Cargo tests passed, with zero failures and three
+ignored across 44 reported targets. The terminal case covers entering a lower
+root, Backspace revealing one parent level, and H leaving details for Home.
+The collection case verifies deferred parent acquisition and selection retention
+after a focused refresh changes the bead's rendered path. Platform and full Nix
+coverage limits remain as above.
+
+Both all-target and non-test Clippy checks passed with warnings denied. Formatting,
+diff/source scans, package verification and the canonical release build passed.
+The installed linked-plugin binary reports 0.42.2 and matches that release build.
+No fresh live Herdr-pane, macOS or full Nix validation is claimed.

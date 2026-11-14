@@ -38,7 +38,8 @@ Each project has its own header; foreign-project rows remain qualified.
 | Left/h | Collapse an expanded branch; otherwise select its parent |
 | Ctrl+Space | Set the selected bead as root, including within an existing scope |
 | F | Existing focus/restore shortcut |
-| Home | Restore Current work across all unfinished roots |
+| Home or H | Restore Current work across all unfinished roots |
+| Backspace | Reveal the displayed root’s parent level, keeping the selected bead |
 | Space or Enter | Open details; in details, follow the selected relation or focus its pane |
 | o | Toggle the selected branch fold |
 | b | Switch ownership tree / dependency graph |
@@ -173,7 +174,24 @@ graph and ready rows. Selection highlighting is preserved in both modes.
 Compact branch connectors touch the marker directly, for example `├─[~]`, without
 changing the configured indentation step or open/collapsed alignment.
 
-`indent` controls tree spacing, `ascii` provides font-independent connectors and
+`indent` controls connector width. Compact nested levels add one alignment cell
+so branches descend from the centre of the parent's `[x]` marker; the first
+project trunk keeps its existing column. For example, at `indent = 2`:
+
+```text
+├─[x] Parent
+│  ├─[x] Child
+│  │  └─[x] Grandchild
+```
+
+`H` also returns to Home from details or the bindings screen. Backspace moves
+only one containing root level and preserves the current scope/filter and bead
+selection. At the highest root it restores the surrounding forest; with no
+focused root it does nothing. If a focused refresh omitted the parent, the viewer
+requests it through the ordinary collector, without modifying any tracker data.
+Backspace still edits the search query while the search prompt is active.
+
+`ascii` provides font-independent connectors and
 `show_ids` can restore IDs when wanted. Width fitting reduces optional fields
 and truncates rows. Details use available width and can scroll. Plain Beads works
 with no `[omo]` configuration; absent activity data remains explicitly unknown.
