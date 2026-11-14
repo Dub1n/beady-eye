@@ -173,3 +173,8 @@ root, Backspace revealing one parent level, and H leaving details for Home.
 The collection case verifies deferred parent acquisition and selection retention
 after a focused refresh changes the bead's rendered path. Platform and full Nix
 coverage limits remain as above.
+
+Both all-target and non-test Clippy checks passed with warnings denied. Formatting,
+diff/source scans, package verification and the canonical release build passed.
+The installed linked-plugin binary reports 0.42.2 and matches that release build.
+No fresh live Herdr-pane, macOS or full Nix validation is claimed.
