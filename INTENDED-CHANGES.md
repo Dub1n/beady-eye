@@ -345,3 +345,29 @@ remain the baseline. Configuration examples use invented projects.
   controls and nested structure. Cover always and single-tree modes.
 - [x] Name the setting `hide_root_indent` so `always` clearly means always hide;
   accept the old `root_indent` spelling without changing its meaning.
+
+## Session identity and detail markers
+
+- [x] Resolve missing model identity from the exact worker session, or the
+  coordinator session for explicitly direct work. Bound/cache log reads, verify
+  session IDs, preserve attempt correlation and never infer liveness/acceptance
+  merely from a model record. Report missing or ambiguous evidence honestly.
+- [x] Use configured fork status markers and bracket colours in detail headers
+  and all related-bead sections, including current correlated activity when the
+  referenced bead is available, with identical drawing/click geometry.
+
+Ownership is non-exclusive: a coordinator or worker may own multiple beads and
+must appear on each current explicit association. Reusing a task/session across
+beads is not itself conflicting evidence. Native explicit bead/attempt mismatch
+still requires attention. A known coordinator may be displayed as `model (coord)`
+when the delegated worker model is unavailable; it must not be called the worker.
+
+## Stable grouping, fold hints and persistent filters
+
+- [x] Keep completed trees in their existing section while inspecting hidden work;
+  do not promote a hidden tree merely because its row was selected.
+- [x] Avoid preview ellipses caused solely by captured trailing blank padding.
+- [x] Centre group disclosure arrows on tree verticals, including the project
+  heading; show a collapsed bead arrow after its status without a new left column.
+- [x] Keep nonblank active filters visible after leaving search and restore the
+  exact saved query cursor when search is reopened. Whitespace alone is no filter.

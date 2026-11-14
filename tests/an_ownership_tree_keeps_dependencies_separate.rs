@@ -174,7 +174,13 @@ fn filtering_and_arrow_navigation_keep_the_prompt_editable_and_help_scrolls() {
             .any(|row| row.contains("Other work")),
         "Enter keeps filter"
     );
-    let clear_filter = app.send(b"\x06\r");
+    assert!(
+        terminal::rows_drawn(&screen)
+            .iter()
+            .any(|row| row.contains("?~ refund")),
+        "accepted filter stays visible"
+    );
+    let clear_filter = app.send(b"\x06\x01\x0b\r");
     app.answer_to(clear_filter, GIVING_UP);
     let repaint = app.resize(19, 80);
     let screen = app.answer_to(repaint, GIVING_UP);

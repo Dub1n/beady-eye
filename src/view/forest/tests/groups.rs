@@ -679,3 +679,33 @@ fn a_project_whose_environment_will_not_run_says_so_once_opened() {
         ["lunar: could not set up this project's environment · nothing was read"]
     );
 }
+
+#[test]
+fn inspecting_hidden_work_does_not_promote_it_on_refresh() {
+    let mut initial = snapshot();
+    initial.refilter(Filter::CurrentWork);
+    // Use a genuinely finished root: CurrentWork deliberately holds it back.
+    let mut finished = (*initial.collected.last().unwrap().as_ref()).clone();
+    for node in &mut finished.beads {
+        node.status = crate::model::types::Status::Closed;
+    }
+    finished.counts = crate::model::snapshot::Counts::over(&finished.beads);
+    let key = root_key(&finished);
+    initial.collected = vec![std::sync::Arc::new(finished)];
+    initial.refilter(Filter::CurrentWork);
+    let mut forest = flatten(initial.clone());
+    select_hidden_tree(&mut forest);
+    for _ in 0..3 {
+        forest.refresh(initial.clone());
+        assert!(!forest
+            .snapshot
+            .trees
+            .iter()
+            .any(|tree| root_key(tree) == key));
+        assert!(forest
+            .snapshot
+            .hidden_trees
+            .iter()
+            .any(|tree| tree.root == key.id));
+    }
+}

@@ -267,8 +267,9 @@ or creates extra worker receipts itself.
 The viewer reads persistent Beads rows through read-only CLI calls. On each
 snapshot it collects each configured project's referenced native task files,
 validating the dispatch against the current attempt rather than choosing a
-recent task by title or model. It does not scan session transcripts or enumerate
-the task directory. Duplicate rendered copies share that snapshot's collection.
+recent task by title or model. It does not enumerate the task directory.
+Duplicate rendered copies share that snapshot's collection. Missing identity can
+be read from explicitly linked native session logs, as described below.
 
 The OmO adapter understands native snake_case task records, including task ID,
 parent/child sessions, name, agent type, effective model, status and timestamps.
@@ -317,7 +318,10 @@ installation checks must be reported separately from mocked/PTY coverage.
 With `[row] search_mode = "filter"`, edits narrow the displayed rows while
 retaining ancestors for context. Up/Down moves the selection without ending
 editing in either mode. Enter keeps the result/filter; Esc cancels the current
-prompt. Reopen search and press Enter on an empty query to clear filtering, or press Home/H.
+prompt and restores its previous accepted filter. A nonblank accepted filter stays
+visible; reopening search restores its query and exact edit cursor. Clear the query
+(Ctrl+A, Ctrl+K) and press Enter to remove it, or press Home/H. Whitespace alone
+does not apply a filter.
 Full IDs, titles and ordinary case-insensitive text searches remain available.
 
 A leading run of status characters selects **any** of those displayed statuses:
@@ -365,3 +369,55 @@ and show unknown activity as `?` or `model · ?`. Details retain the full eviden
 `preview_min_height` sets the minimum preview content rows; a short tree can
 leave it more room, and a tiny terminal clamps it to preserve the tree. Delimiter
 dragging is not implemented; resizing is controlled through configuration.
+
+## Linked session identity and detail markers
+
+The optional `[omo.<project>] session_directory` is an absolute path to that
+project's coordinator session directory. There is no automatic home-wide search.
+For example, an invented deployment can configure:
+
+```toml
+[omo.arkham]
+task_directory = "/srv/arkham/tasks"
+session_directory = "/srv/arkham/sessions"
+```
+
+A current explicit attempt establishes ownership. A native task's recorded model
+remains authoritative. When missing, the adapter follows its worker session ID
+into the native task's sibling `children/<task-id>/sessions/<task-id>` directory.
+A missing worker ID is recoverable only if that exact directory contains one
+unambiguous log whose filename and v3 session header agree. Explicit direct work
+can use the exact coordinator session as its worker identity. Delegated work may
+show a separately verified coordinator as `model (coord)` when the worker model
+is unavailable; it never substitutes that coordinator for the worker. Unresolved
+models can still show a shortened worker/coordinator ID; details retain full IDs.
+One agent may own multiple beads: each current explicit association is displayed.
+Sharing a task/session is not itself a conflict. Explicit native bead, project or
+attempt mismatches remain conflicts. Archived attempts do not become current.
+
+An attempt UUID is workflow correlation, not necessarily a runtime session ID or
+an attempt-log filename. Existing task records, worker/coordinator session logs
+and Beads history hold different evidence; the viewer follows current explicit
+links rather than guessing from titles or scanning unrelated historical logs.
+
+Session reads examine header/model-change records only, retaining identity and
+file checkpoints rather than transcripts. Directory scans stop at 1,024 entries;
+body reads share a 64 MiB budget per collection, and the cache holds at most 256
+files. Large initial scans continue on later refreshes; shared owners retain
+progress even when another lookup exhausts the budget. Appends are incremental;
+partial final records wait for completion. Missing, ambiguous, malformed or
+unsupported logs are explained in details. A known model does not establish
+current activity, success or acceptance: `model · ?` is valid.
+
+Compact bead details use the same bracket markers and bracket-colour setting in
+the heading and related-bead lists (including PARENT and MENTIONS). References to
+loaded beads use their current snapshot state; missing references remain explicit.
+Legacy detail rendering remains available with the legacy row layout.
+
+Group disclosure arrows and project headings align with the compact tree
+verticals. A collapsed bead carries its arrow immediately after the status's
+normal separator (`[ ] ▸ title`, or `[ ] > title` in ASCII); opening it removes
+the hint without adding a left-side column. Selecting hidden completed work does
+not promote its tree into the main section on refresh. Explicit rooting remains
+available. Preview rows ignore trailing blank capture padding when deciding
+whether content was truncated; genuine clipped text still carries an ellipsis.

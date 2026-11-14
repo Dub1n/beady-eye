@@ -13,6 +13,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+mod sessions;
+
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const MAX_BATCH_RECORDS: usize = 256;
 const MAX_WORKERS_PER_BEAD: usize = 16;
@@ -24,6 +26,8 @@ const MAX_STRING: usize = 512;
 pub struct OmoConfig {
     /// Directory containing `<task_id>.json`; it is read directly, never scanned.
     pub task_directory: PathBuf,
+    /// Exact project session-log directory for direct coordinator identity.
+    pub session_directory: Option<PathBuf>,
     /// Beads metadata path to the active attempt ID.
     pub attempt_path: String,
     /// Beads metadata path to the dispatch receipt object.
@@ -42,6 +46,7 @@ impl Default for OmoConfig {
     fn default() -> Self {
         Self {
             task_directory: PathBuf::new(),
+            session_directory: None,
             attempt_path: "metadata.qrclipWork.attempt".into(),
             dispatch_path: "metadata.qrclipDispatch".into(),
             acceptance_ready_path: None,
@@ -57,6 +62,13 @@ impl OmoConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !self.task_directory.is_absolute() {
             return Err("OmO task_directory must be an absolute path");
+        }
+        if self
+            .session_directory
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute())
+        {
+            return Err("OmO session_directory must be an absolute path");
         }
         if self.attempt_path.is_empty()
             || self.dispatch_path.is_empty()
@@ -96,6 +108,8 @@ pub struct Activity {
     pub effective_model: Option<String>,
     pub child_session: Option<String>,
     pub coordinator: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_model: Option<String>,
     pub observed_at: Option<DateTime<Utc>>,
     pub fresh: Option<bool>,
     pub acceptance_ready: bool,
@@ -107,15 +121,28 @@ pub struct Activity {
 impl Activity {
     /// Short display label for the effective model, preserving unknown models.
     pub fn model_label(&self) -> Option<&str> {
-        self.effective_model.as_deref().map(|model| {
-            let compact = model.rsplit('/').next().unwrap_or(model);
-            match compact {
-                "GPT-6 Luna" | "gpt-6-luna" => "Luna",
-                "GPT-6.1 Sol" | "gpt-6.1-sol" => "Sol",
-                "mixed" => "Mixed models",
-                other => other.strip_prefix("gpt-").unwrap_or(other),
-            }
-        })
+        self.effective_model.as_deref().map(short_model)
+    }
+
+    /// Known worker model, or an explicitly labelled coordinator owner.
+    pub fn owner_label(&self) -> Option<String> {
+        self.model_label()
+            .map(str::to_owned)
+            .or_else(|| {
+                self.coordinator_model
+                    .as_deref()
+                    .map(|model| format!("{} (coord)", short_model(model)))
+            })
+            .or_else(|| {
+                self.child_session
+                    .as_deref()
+                    .map(|id| format!("worker {}", id.chars().take(8).collect::<String>()))
+            })
+            .or_else(|| {
+                self.coordinator
+                    .as_deref()
+                    .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
+            })
     }
 
     /// Human-readable state for a detail pane.
@@ -129,6 +156,16 @@ impl Activity {
             ActivityState::Unknown => "Activity unknown",
             ActivityState::Conflict => "Conflicting activity evidence",
         }
+    }
+}
+
+fn short_model(model: &str) -> &str {
+    let compact = model.rsplit('/').next().unwrap_or(model);
+    match compact {
+        "GPT-6 Luna" | "gpt-6-luna" => "Luna",
+        "GPT-6.1 Sol" | "gpt-6.1-sol" => "Sol",
+        "mixed" => "Mixed models",
+        other => other.strip_prefix("gpt-").unwrap_or(other),
     }
 }
 
@@ -164,6 +201,7 @@ pub struct ActivityBatch {
 pub struct Reader {
     config: OmoConfig,
     records: BTreeMap<String, CachedRecord>,
+    sessions: sessions::Sessions,
 }
 
 #[derive(Clone)]
@@ -179,11 +217,13 @@ impl Reader {
         Self {
             config,
             records: BTreeMap::new(),
+            sessions: sessions::Sessions::default(),
         }
     }
 
     /// Collect all supplied beads; at most 256 distinct task files are read.
     pub fn collect(&mut self, inputs: &[BeadInput]) -> ActivityBatch {
+        self.sessions.begin();
         let mut batch = ActivityBatch::default();
         let dispatch_path = self.config.dispatch_path.as_str();
         let referenced = inputs
@@ -193,7 +233,19 @@ impl Reader {
         self.records
             .retain(|task_id, _| referenced.contains(task_id));
         for input in inputs {
-            let activity = self.read_one(input);
+            let mut activity = self.read_one(input);
+            self.coordinator_identity(&mut activity);
+            if activity.workers.is_empty() {
+                self.session_identity(&mut activity);
+            }
+            for worker in &mut activity.workers {
+                self.coordinator_identity(worker);
+                self.session_identity(worker);
+            }
+            if !activity.workers.is_empty() {
+                let workers = std::mem::take(&mut activity.workers);
+                activity = aggregate(activity, workers);
+            }
             if activity.attempt_id.is_none() {
                 continue;
             }
@@ -217,12 +269,10 @@ impl Reader {
             if keys.len() > 1 {
                 for key in keys {
                     if let Some(activity) = batch.activities.get_mut(&key) {
-                        activity.state = ActivityState::Conflict;
-                        activity.evidence.push(format!("task {task_id} is claimed by multiple current beads in project {project}"));
+                        activity.evidence.push(format!("task {task_id} is shared by multiple current beads in project {project}; ownership is not exclusive"));
                         for worker in &mut activity.workers {
                             if worker.task_id.as_deref() == Some(task_id.as_str()) {
-                                worker.state = ActivityState::Conflict;
-                                worker.evidence.push(format!("task {task_id} is claimed by multiple current beads in project {project}"));
+                                worker.evidence.push(format!("task {task_id} is shared by multiple current beads in project {project}; ownership is not exclusive"));
                             }
                         }
                     }
@@ -230,6 +280,85 @@ impl Reader {
             }
         }
         batch
+    }
+
+    fn coordinator_identity(&mut self, activity: &mut Activity) {
+        if activity.attempt_id.as_deref().is_none_or(str::is_empty) {
+            return;
+        }
+        if let Some((directory, session)) = self
+            .config
+            .session_directory
+            .as_ref()
+            .zip(activity.coordinator.as_ref())
+        {
+            match self.sessions.model(directory, session) {
+                Ok(model) => {
+                    activity.coordinator_model = Some(model);
+                    activity.evidence.push(format!("coordinator ownership from current attempt and verified session {session}; ownership may be shared across beads"));
+                }
+                Err(reason) => activity
+                    .evidence
+                    .push(format!("coordinator identity unavailable: {reason}")),
+            }
+        }
+    }
+
+    fn session_identity(&mut self, activity: &mut Activity) {
+        if activity.attempt_id.as_deref().is_none_or(str::is_empty)
+            || activity.effective_model.is_some()
+            || activity.state == ActivityState::Conflict
+        {
+            return;
+        }
+        let linked = if let Some(task) = &activity.task_id {
+            if !safe_id(task) {
+                return;
+            }
+            self.config.task_directory.parent().map(|parent| {
+                (
+                    parent
+                        .join("children")
+                        .join(task)
+                        .join("sessions")
+                        .join(task),
+                    activity.child_session.clone(),
+                    "worker",
+                )
+            })
+        } else if activity.worker_type.as_deref() == Some("direct") {
+            self.config
+                .session_directory
+                .as_ref()
+                .zip(activity.coordinator.as_ref())
+                .map(|(directory, session)| {
+                    (directory.clone(), Some(session.clone()), "coordinator")
+                })
+        } else {
+            None
+        };
+        let Some((directory, session, role)) = linked else {
+            return;
+        };
+        let identity = match session {
+            Some(session) => self
+                .sessions
+                .model(&directory, &session)
+                .map(|model| (session, model)),
+            None => self.sessions.discover(&directory),
+        };
+        match identity {
+            Ok((session, model)) => {
+                activity.effective_model = Some(model);
+                if role == "worker" {
+                    activity.child_session = Some(session.clone());
+                }
+                activity.evidence.push(format!("{role} model from verified session {session}; identity only, not bead liveness or acceptance"));
+            }
+            Err(reason) => activity
+                .evidence
+                .push(format!("{role} identity unavailable: {reason}")),
+        }
     }
 
     fn read_one(&mut self, input: &BeadInput) -> Activity {
@@ -648,6 +777,7 @@ fn empty_activity(input: &BeadInput) -> Activity {
         effective_model: None,
         child_session: None,
         coordinator: None,
+        coordinator_model: None,
         observed_at: None,
         fresh: None,
         acceptance_ready: false,
@@ -962,6 +1092,93 @@ mod tests {
         )
     }
     #[test]
+    fn direct_session_identity_does_not_claim_execution_or_acceptance() {
+        let dir = temp_dir("direct-session");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("invented_coord-1.jsonl"), "{\"type\":\"session\",\"version\":3,\"id\":\"coord-1\"}\n{\"type\":\"model_change\",\"provider\":\"invented\",\"modelId\":\"gpt-6.1-sol\"}\n").unwrap();
+        let mut row = input();
+        row.fields["metadata"]["qrclipDispatch"] = Value::Null;
+        row.fields["metadata"]["qrclipWork"]["attempt"]["mode"] = "direct".into();
+        let mut reader = Reader::new(OmoConfig {
+            task_directory: dir.join("tasks"),
+            session_directory: Some(dir.clone()),
+            ..Default::default()
+        });
+        let activity = reader
+            .collect(&[row.clone()])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(activity.model_label(), Some("Sol"));
+        assert_eq!(activity.state, ActivityState::Unknown);
+        assert_eq!(activity.fresh, None);
+        assert!(!activity.acceptance_ready);
+        assert!(activity
+            .evidence
+            .iter()
+            .any(|e| e.contains("identity only")));
+        let mut second = row.clone();
+        second.bead_id = "demo-2".into();
+        second.fields["metadata"]["qrclipWork"]["attempt"]["id"] = "attempt-2".into();
+        let shared = reader.collect(&[row.clone(), second]);
+        assert_eq!(shared.activities.len(), 2);
+        assert!(shared
+            .activities
+            .values()
+            .all(|a| a.model_label() == Some("Sol") && a.state == ActivityState::Unknown));
+        row.fields["metadata"]["qrclipWork"]["attempt"]["mode"] = "delegate".into();
+        let activity = reader
+            .collect(&[row])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(
+            activity.effective_model, None,
+            "coordinator is not the delegated worker"
+        );
+        assert_eq!(activity.owner_label().as_deref(), Some("Sol (coord)"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_native_record_can_resolve_its_own_worker_log_without_coordinator_substitution() {
+        let root = temp_dir("worker-session");
+        let directory = root.join("children/task-1/sessions/task-1");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("invented_worker-session.jsonl"), "{\"type\":\"session\",\"version\":3,\"id\":\"worker-session\"}\n{\"type\":\"model_change\",\"provider\":\"invented\",\"modelId\":\"gpt-6-luna\"}\n").unwrap();
+        let mut reader = Reader::new(OmoConfig {
+            task_directory: root.join("tasks"),
+            ..Default::default()
+        });
+        let mut row = input();
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+        let activity = reader
+            .collect(&[row.clone()])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(activity.model_label(), Some("Luna"));
+        assert_eq!(activity.child_session.as_deref(), Some("worker-session"));
+        assert_eq!(activity.state, ActivityState::Unknown);
+        assert!(!activity.acceptance_ready);
+        row.fields["metadata"]["qrclipDispatch"]["attemptId"] = "old-attempt".into();
+        let activity = reader
+            .collect(&[row])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(
+            activity.effective_model, None,
+            "stale attempt cannot claim the worker log"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn matched_completion_is_finished_not_success_or_acceptance() {
         let activity = reader_with(record("completed"))
             .collect(&[input()])
@@ -996,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_current_task_ownership_conflicts_both_beads() {
+    fn one_worker_can_own_multiple_current_beads() {
         let first = input();
         let mut second = input_for("demo-2");
         second.fields["metadata"]["qrclipWork"]["attempt"]["id"] =
@@ -1008,7 +1225,12 @@ mod tests {
         assert!(batch
             .activities
             .values()
-            .all(|activity| activity.state == ActivityState::Conflict));
+            .all(|activity| activity.state == ActivityState::Working
+                && activity.model_label() == Some("Luna")));
+        assert!(batch.activities.values().all(|a| a
+            .evidence
+            .iter()
+            .any(|e| e.contains("ownership is not exclusive"))));
     }
 
     #[test]

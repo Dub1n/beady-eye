@@ -2009,7 +2009,15 @@ impl Forest {
 
     fn remember_inspected_tree(&mut self, at: usize) {
         if let Some(place) = self.lines.get(at).and_then(|line| line.place.as_ref()) {
-            self.pinned_root = Some(place.tree.clone());
+            // Inspecting hidden work must not promote it on the next poll.
+            if self
+                .snapshot
+                .trees
+                .iter()
+                .any(|tree| root_key(tree) == place.tree)
+            {
+                self.pinned_root = Some(place.tree.clone());
+            }
         }
     }
 

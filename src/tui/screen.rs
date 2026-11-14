@@ -177,6 +177,7 @@ struct Shown {
     /// is: it is about a prompt over the rows, not about the rows. The loop
     /// holds that a prompt is up; this is what is in it.
     sought: Option<Prompt>,
+    retained_filter: Option<Query>,
     /// What the collection in flight is reading and when it was asked for,
     /// where one is running. Every project line it names says its own rows
     /// are about to be replaced, and the rest of the screen carries on saying
@@ -270,6 +271,7 @@ impl Shown {
             due: None,
             said: None,
             sought: None,
+            retained_filter: None,
             // Nothing in flight until the loop says otherwise. A collection
             // is already running by the time this exists — the run asks for
             // one before it opens the screen — and it reaches this the way
@@ -744,11 +746,15 @@ impl Shown {
                 self.moved(true)
             }
             Typing::Sought => {
-                let clear = prompt.query.typed().is_empty()
+                let clear = prompt.query.typed().trim().is_empty()
                     && self.drawing.layout.search_mode == crate::view::row::SearchMode::Filter;
                 if clear {
                     self.forest.filter_search("");
                 }
+                self.retained_filter = (self.drawing.layout.search_mode
+                    == crate::view::row::SearchMode::Filter
+                    && !prompt.query.typed().trim().is_empty())
+                .then(|| prompt.query.clone());
                 self.sought = None;
                 self.moved(true)
             }
@@ -793,7 +799,12 @@ impl Shown {
             return false;
         };
         if self.drawing.layout.search_mode == crate::view::row::SearchMode::Filter {
-            self.forest.filter_search(prompt.query.typed());
+            self.forest
+                .filter_search(if prompt.query.typed().trim().is_empty() {
+                    ""
+                } else {
+                    prompt.query.typed()
+                });
         }
         if prompt.query.typed().is_empty() {
             self.forest.restore(&prompt.origin);
@@ -869,17 +880,19 @@ impl Shown {
         if let Action::NextMatch | Action::PreviousMatch = action {
             return self.step_match(action == Action::NextMatch);
         }
-        // The prompt goes up empty. What it holds is this side of the seam;
-        // that it is up is the loop's, which is what makes a keystroke mean a
-        // character of an id rather than the binding the same key carries.
+        // Resume an accepted filter at its edit cursor. Jump searches start
+        // empty; the loop still decides when keys edit rather than navigate.
         if action == Action::Search {
             self.sought = Some(Prompt {
-                query: Query::default(),
+                query: self.retained_filter.clone().unwrap_or_default(),
                 origin: self.forest.origin(),
             });
             return true;
         }
 
+        if action == Action::Home {
+            self.retained_filter = None;
+        }
         let changed = self.forest.apply(action);
         self.moved(changed)
     }
@@ -1199,6 +1212,7 @@ fn paint(
                 // forest's to answer, and the window asks it of each of them:
                 // the ids it answers for are drawn in blue, and the title
                 // says which keys are worth pressing on the strength of it.
+                show.configure(layout, forest, node, &mentioned);
                 show::show(
                     frame,
                     frame.area(),
@@ -1406,6 +1420,7 @@ impl<B: PutBack> View for Screen<B> {
             lapsed,
             said,
             sought,
+            retained_filter,
             drawing,
             room,
             bindings_offset,
@@ -1426,7 +1441,10 @@ impl<B: PutBack> View for Screen<B> {
         let foot = draw::Foot {
             standing: &says,
             said: said.as_ref(),
-            prompt: sought.as_ref().map(|prompt| &prompt.query),
+            prompt: sought
+                .as_ref()
+                .map(|prompt| &prompt.query)
+                .or(retained_filter.as_ref()),
             keys: &keys,
         };
         let band = draw::Band {
@@ -4360,6 +4378,31 @@ mod tests {
 
     // ---- searching for a bead by id ---------------------------------------
 
+    #[test]
+    fn accepted_filter_stays_visible_and_reopens_at_its_saved_cursor() {
+        let mut shown = shown(a_grove(6));
+        shown.drawing.layout.search_mode = crate::view::row::SearchMode::Filter;
+        shown.apply(Action::Search);
+        type_into_prompt(&mut shown, "grv-1");
+        shown.typing(Typing::Edit(Edit::Back));
+        let saved = shown.sought.as_ref().unwrap().query.clone();
+        shown.typing(Typing::Sought);
+        assert!(shown.sought.is_none());
+        assert_eq!(shown.retained_filter.as_ref(), Some(&saved));
+        assert!(foot_of(&mut shown, 100, 24).contains("grv-1"));
+        shown.apply(Action::Search);
+        assert_eq!(shown.sought.as_ref().unwrap().query, saved);
+        shown.typing(Typing::Edit(Edit::Character('x')));
+        shown.typing(Typing::Abandoned);
+        assert_eq!(shown.retained_filter.as_ref(), Some(&saved));
+        shown.apply(Action::Home);
+        assert!(shown.retained_filter.is_none());
+        shown.apply(Action::Search);
+        type_into_prompt(&mut shown, "   ");
+        shown.typing(Typing::Sought);
+        assert!(shown.retained_filter.is_none());
+    }
+
     /// Type an id into the prompt and ask for it.
     fn search_for(shown: &mut Shown, id: &str) {
         press(shown, KeyCode::Char('/'));
@@ -4773,7 +4816,11 @@ mod tests {
             Over::Nothing,
             Pressed {
                 said: shown.said.as_ref(),
-                prompt: shown.sought.as_ref().map(|prompt| &prompt.query),
+                prompt: shown
+                    .sought
+                    .as_ref()
+                    .map(|prompt| &prompt.query)
+                    .or(shown.retained_filter.as_ref()),
             },
             &[],
             &[],

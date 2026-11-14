@@ -89,6 +89,15 @@ pub fn draw_tail(frame: &mut Frame, area: Rect, band: Band<'_>) {
 fn as_the_pane_drew_it(said: Line<'static>) -> Fitted {
     let mut spans = vec![Span::raw(indent())];
     spans.extend(said.spans);
+    // Pane captures are often padded to the source terminal width. Blank
+    // overflow is not hidden content and must not manufacture a cut marker.
+    while let Some(last) = spans.last_mut() {
+        last.content = last.content.trim_end_matches(' ').to_string().into();
+        if !last.content.is_empty() {
+            break;
+        }
+        spans.pop();
+    }
     Fitted::new(spans, Vec::new(), Vec::new())
 }
 
@@ -128,6 +137,22 @@ mod tests {
 
     use crate::view::painted::{Painted, Run};
     use crate::view::phrase;
+
+    #[test]
+    fn capture_padding_does_not_produce_false_preview_cuts() {
+        let tail = Tail::Pane {
+            pane: key("wCM:p9"),
+            lines: vec!["short row                                  ".into()],
+        };
+        let rows = tail_frame(&tail, 20, 2, 0).rows();
+        assert!(rows[1].contains("short row"));
+        assert!(!rows[1].contains('…'));
+        let tail = Tail::Pane {
+            pane: key("wCM:p9"),
+            lines: vec!["real content that is too long to fit".into()],
+        };
+        assert!(tail_frame(&tail, 20, 2, 0).rows()[1].contains('…'));
+    }
 
     /// The tail drawn into a band that starts partway down the screen, which
     /// is the only place it ever is.
