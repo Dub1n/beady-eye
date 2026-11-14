@@ -1,7 +1,7 @@
 //! The bead view: the selected bead shown whole, as `bd show` shows it, in a
 //! window over the forest.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -108,6 +108,8 @@ fn offered(screen: u16) -> u16 {
 /// first motion never reads a window nobody has measured.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Show {
+    layout: Option<row::Layout>,
+    markers: BTreeMap<BeadKey, (Status, Vec<Span<'static>>)>,
     from: usize,
     room: usize,
     total: usize,
@@ -126,6 +128,31 @@ pub struct Show {
 }
 
 impl Show {
+    /// Freeze the same status presentation for painting and pointer geometry.
+    pub fn configure(
+        &mut self,
+        layout: &row::Layout,
+        forest: &Forest,
+        node: &Node,
+        mentioned: &[Related],
+    ) {
+        self.layout = Some(layout.clone());
+        self.markers.clear();
+        for related in related(node, mentioned) {
+            if let Some(key) = key_of(forest, related) {
+                if let Some(bead) = forest.snapshot().node(&key) {
+                    self.markers.insert(
+                        key,
+                        (
+                            bead.status.clone(),
+                            detail_marker(&bead.status, bead.activity.as_ref(), Some(layout)),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     /// Move the view by one motion, reporting whether what it shows changed.
     ///
     /// The last row of the bead is as far as it goes: scrolled past it the
@@ -394,17 +421,30 @@ fn lay_out(
     mentioned: &[Related],
     progress: Option<Progress>,
     followable: &dyn Fn(&Related) -> bool,
+    view: &Show,
 ) -> Laid {
     let window = show_window(area);
     let inner = window_block().inner(window);
-    let page = said(
-        node,
-        mentioned,
-        progress,
-        inner.width as usize,
-        inner.height as usize,
-        followable,
-    );
+    let page = if view.layout.is_some() {
+        said_styled(
+            node,
+            mentioned,
+            progress,
+            inner.width as usize,
+            inner.height as usize,
+            followable,
+            view,
+        )
+    } else {
+        said(
+            node,
+            mentioned,
+            progress,
+            inner.width as usize,
+            inner.height as usize,
+            followable,
+        )
+    };
     Laid {
         page,
         window,
@@ -449,7 +489,7 @@ pub fn drawn_at<'a>(
     row: u16,
     followable: &dyn Fn(&Related) -> bool,
 ) -> Drawn<'a> {
-    let Laid { page, inner, .. } = lay_out(area, node, mentioned, progress, followable);
+    let Laid { page, inner, .. } = lay_out(area, node, mentioned, progress, followable, view);
     if !(inner.y..inner.bottom()).contains(&row) {
         return Drawn::Beyond;
     }
@@ -513,13 +553,33 @@ pub fn said(
     window: usize,
     followable: &dyn Fn(&Related) -> bool,
 ) -> Page {
+    said_styled(
+        node,
+        mentioned,
+        progress,
+        width,
+        window,
+        followable,
+        &Show::default(),
+    )
+}
+
+fn said_styled(
+    node: &Node,
+    mentioned: &[Related],
+    progress: Option<Progress>,
+    width: usize,
+    window: usize,
+    followable: &dyn Fn(&Related) -> bool,
+    view: &Show,
+) -> Page {
     let cells = row::cells(node, None, progress, None);
-    let name = vec![
-        Span::styled(cells.glyph.to_string(), status_style(&cells.status)),
+    let mut name = detail_marker(&cells.status, node.activity.as_ref(), view.layout.as_ref());
+    name.extend(vec![
         Span::raw(" "),
         Span::styled(cells.id.clone(), palette::IDENTITY),
         Span::raw(indent()),
-    ];
+    ]);
     let where_the_title_starts = name.iter().map(Span::width).sum::<usize>();
     let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
     for line in title_of(
@@ -579,6 +639,7 @@ pub fn said(
             ("Attempt", activity.attempt_id.as_deref()),
             ("Child session", activity.child_session.as_deref()),
             ("Coordinator", activity.coordinator.as_deref()),
+            ("Coordinator model", activity.coordinator_model.as_deref()),
         ] {
             if let Some(value) = value {
                 facts.push(format!("{label}: {value}"));
@@ -677,7 +738,26 @@ pub fn said(
             .iter()
             .map(|related| {
                 let mut row = vec![Span::styled(format!("{arrow} "), palette::STRUCTURE)];
-                row.extend(related_row(related, followable(related)));
+                let key = BeadKey {
+                    project: related
+                        .project
+                        .clone()
+                        .unwrap_or_else(|| node.project.clone()),
+                    id: related.id.clone(),
+                };
+                let known = view.markers.get(&key);
+                let marker = known.map(|(_, marker)| marker.clone()).or_else(|| {
+                    related
+                        .status
+                        .as_ref()
+                        .map(|status| detail_marker(status, None, view.layout.as_ref()))
+                });
+                row.extend(related_row(
+                    related,
+                    followable(related),
+                    marker,
+                    known.map(|(status, _)| status),
+                ));
                 indented(row)
             })
             .collect::<Vec<_>>()
@@ -791,10 +871,28 @@ fn indented(row: Vec<Span<'static>>) -> Vec<Span<'static>> {
     said
 }
 
-/// A status glyph in the colour the forest paints it, so the same thing is
-/// the same colour on both sides of the border.
-fn glyph(status: &Status) -> Span<'static> {
-    Span::styled(status_glyph(status).to_string(), status_style(status))
+/// Status spans shared by the selected bead and related-bead rows.
+fn detail_marker(
+    status: &Status,
+    activity: Option<&crate::collect::omo::Activity>,
+    layout: Option<&row::Layout>,
+) -> Vec<Span<'static>> {
+    let style = status_style(status);
+    match layout.filter(|layout| layout.compact) {
+        Some(layout) => {
+            let marker = row::appearance::marker(status, activity);
+            if layout.colour_brackets {
+                vec![Span::styled(marker, style)]
+            } else {
+                vec![
+                    Span::raw("["),
+                    Span::styled(marker[1..2].to_owned(), style),
+                    Span::raw("]"),
+                ]
+            }
+        }
+        None => vec![Span::styled(status_glyph(status).to_string(), style)],
+    }
 }
 
 /// A related bead as `bd show` lists one: its glyph, id and title, and the
@@ -807,8 +905,13 @@ fn glyph(status: &Status) -> Span<'static> {
 /// cannot: blue in this window means a bead you can go to. Only a row whose
 /// id is blue is broken up to say so, so a row the reader cannot follow is
 /// the row it always was.
-fn related_row(related: &Related, followable: bool) -> Vec<Span<'static>> {
-    let Some(status) = &related.status else {
+fn related_row(
+    related: &Related,
+    followable: bool,
+    marker: Option<Vec<Span<'static>>>,
+    resolved_status: Option<&Status>,
+) -> Vec<Span<'static>> {
+    let Some(status) = resolved_status.or(related.status.as_ref()) else {
         return vec![Span::raw(format!(
             "{}{}{}",
             related.id,
@@ -825,18 +928,17 @@ fn related_row(related: &Related, followable: bool) -> Vec<Span<'static>> {
         beside.push_str(&format!(" · {}", phrase::edge_kind(kind)));
     }
     let tone = dimmed_if_closed(status);
+    let mut row = marker.unwrap_or_else(|| detail_marker(status, None, None));
     if !followable {
-        return vec![
-            glyph(status),
-            Span::styled(format!(" {}{beside}", related.id), tone),
-        ];
+        row.push(Span::styled(format!(" {}{beside}", related.id), tone));
+    } else {
+        row.extend([
+            Span::styled(" ", tone),
+            Span::styled(related.id.clone(), palette::IDENTITY),
+            Span::styled(beside, tone),
+        ]);
     }
-    vec![
-        glyph(status),
-        Span::styled(" ", tone),
-        Span::styled(related.id.clone(), palette::IDENTITY),
-        Span::styled(beside, tone),
-    ]
+    row
 }
 
 /// A related row falls to the finished tier when the bead it names is
@@ -880,7 +982,7 @@ pub fn show(
         page,
         window,
         inner,
-    } = lay_out(area, node, mentioned, progress, followable);
+    } = lay_out(area, node, mentioned, progress, followable, view);
     if window.is_empty() {
         return;
     }
@@ -1071,6 +1173,76 @@ mod tests {
     /// The whole view, character for character: `bd show`'s sections, in its
     /// order and under its names, with the agent from the join beside the
     /// row's own facts, and the way back in the title.
+    #[test]
+    fn compact_detail_headers_parent_and_mentions_share_fork_markers_and_bracket_colours() {
+        use crate::collect::omo::{Activity, ActivityState};
+        let mut bead = a_bead();
+        bead.activity = Some(Activity {
+            state: ActivityState::Finished,
+            project: bead.project.clone(),
+            bead_id: bead.id.clone(),
+            attempt_id: Some("invented-attempt".into()),
+            task_id: None,
+            worker_name: None,
+            worker_type: None,
+            effective_model: None,
+            child_session: None,
+            coordinator: None,
+            coordinator_model: None,
+            observed_at: None,
+            fresh: Some(true),
+            acceptance_ready: false,
+            evidence: vec![],
+            workers: vec![],
+        });
+        let mentioned = vec![related(
+            "dun-99",
+            Edge::Other("mentioned".into()),
+            Status::Blocked,
+            "Invented dependency",
+        )];
+        for colour_brackets in [false, true] {
+            let layout = row::Layout {
+                colour_brackets,
+                ..Default::default()
+            };
+            let mut view = Show {
+                layout: Some(layout.clone()),
+                ..Default::default()
+            };
+            let parent = bead.parent.as_mut().unwrap();
+            parent.status = None;
+            view.markers.insert(
+                BeadKey {
+                    project: bead.project.clone(),
+                    id: parent.id.clone(),
+                },
+                (
+                    Status::Hooked,
+                    detail_marker(&Status::Hooked, None, Some(&layout)),
+                ),
+            );
+            let page = said_styled(&bead, &mentioned, None, 60, 40, &nothing_followable, &view);
+            let rows: Vec<String> = page
+                .rows
+                .iter()
+                .map(|row| row.iter().map(|span| span.content.as_ref()).collect())
+                .collect();
+            assert!(rows[0].starts_with("[T] "), "{rows:?}");
+            assert!(rows.iter().any(|line| line.contains(&format!("[<] {}", bead.parent.as_ref().unwrap().id))), "{rows:?}");
+            assert!(
+                rows.iter().any(|line| line.contains("[?] dun-99")),
+                "{rows:?}"
+            );
+            let marker = detail_marker(&Status::Blocked, None, Some(&layout));
+            if !colour_brackets {
+                assert_eq!(marker[0].style.fg, None);
+                assert_eq!(marker[2].style.fg, None);
+                assert_eq!(marker[1].style.fg, status_style(&Status::Blocked).fg);
+            }
+        }
+    }
+
     #[test]
     fn the_bead_is_shown_as_bd_show_shows_it() {
         assert_eq!(
@@ -1964,7 +2136,15 @@ mod tests {
                     );
                 });
                 let margins = painted.margins(
-                    lay_out(over(width, height), &bead, &[], None, &nothing_followable).window,
+                    lay_out(
+                        over(width, height),
+                        &bead,
+                        &[],
+                        None,
+                        &nothing_followable,
+                        &Show::default(),
+                    )
+                    .window,
                 );
                 read += margins.chars().count();
 

@@ -247,3 +247,40 @@ Clippy with warnings denied, formatting, the three extracted upstream source
 scans, clean package verification and the canonical release installation passed.
 The installed binary reports 0.43.1. Nix/macOS and a fresh live Herdr pane were
 not exercised; reopening the viewer loads the installed version.
+
+## 0.44.0 session identity, detail markers and compact-view follow-ups
+
+Missing model identity follows verified worker session IDs or explicitly direct
+coordinator sessions. Delegated coordinator identity stays separately labelled.
+Ownership is non-exclusive across current bead associations; explicit native
+bead/attempt/project mismatches still conflict. Detail headers and related beads
+use configured bracket markers with shared drawing/hit geometry.
+
+Invented regressions cover direct/shared ownership, delegated coordinator labels,
+missing worker records and unique session discovery, ambiguity, unsupported IDs,
+partial appends, replacement/truncation, read budgets and cached progress after
+shared-owner lookups. Detail tests cover bracket colours, current related state
+and real terminal rendering at 30 and 60 columns. Compact view regressions cover
+hidden completed roots remaining in their section across repeated refreshes,
+blank-padded versus genuinely clipped preview rows, group/project disclosures,
+collapsed root hints, persistent accepted filter text/cursor, Esc restoration,
+clearing, whitespace and Home. Existing terminal search tests now explicitly
+clear the restored query rather than expecting reopening to discard it.
+
+A private read-only four-collection audit of 40 current attempts recovered worker
+or direct model identity for 27 and separately known coordinator identity for
+13 by the second collection, stable through the fourth. The initial bounded
+collection had 19 unresolved models; subsequent collections resumed cached log
+scans. Fifteen native records remained Finished and 25 Unknown throughout: model
+recovery did not promote activity or acceptance. This was an adapter audit of a
+saved local tracker snapshot plus linked logs, not a fresh live pane exercise or
+proof that each owner was currently executing. No private captures were committed.
+The local config was backed up before adding its explicit coordinator directory.
+
+Nix and macOS checks are unavailable here. The user's running Herdr pane was not
+controlled or restarted. Empty GitHub check results are not a CI verdict.
+
+The full Cargo suite passed: 2,799 tests, zero failures and 3 ignored across 44
+reported targets. Clippy with warnings denied (production and all targets),
+formatting, all three extracted upstream source scans and clean Cargo package
+verification passed. The canonical release installation reports 0.44.0 and matches the release binary byte for byte.

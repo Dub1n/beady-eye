@@ -181,6 +181,11 @@ mouse inverses and both modes. The fork's `compact_controls` tests exercise thes
 cases; rebase them onto upstream's original layout rather than its fork defaults.
 
 
+**0.44.0 follow-up to proposal 2:** Hidden-tree inspection no longer promotes a
+completed tree into the main section on refresh. Extract the selection-pin fix
+independently, reproduce repeated refreshes first, and preserve explicit rooting
+and selected-completion retention. Include the invented hidden-root regression.
+
 ## 3. Configurable indentation and ASCII connectors
 
 **Priority:** strong general-purpose presentation proposal; a useful renderer base.
@@ -230,6 +235,12 @@ old values. For proposal 3, extract the shared prefix rule and config migration
 together; test always/single-tree/never across project counts, ASCII/Unicode,
 connector widths and expanded/collapsed groups, including global-group children.
 Keep model paths, source snapshots and click row geometry unchanged.
+
+**0.44.0 follow-up to proposal 3:** Compact group/project disclosures move onto
+the vertical column; collapsed beads put their arrow after the marker, including
+roots whose project indentation is hidden. Keep this separate from indentation
+configuration if upstream prefers its existing elbows. Preserve default geometry
+upstream and test ASCII, hidden roots, expanded/collapsed alignment and click rows.
 
 ## 4. Preserve useful titles in narrow tree panes
 
@@ -318,6 +329,12 @@ not require OmO, sticky headers or the fork's marker vocabulary. Coordinate the
 single reserved row with proposal 2, test preview on/off and tiny/narrow screens,
 and retain semantic distinctions between finished execution and stored closure.
 
+
+**0.44.0 follow-up to proposal 5:** Detail headings and every related-bead section
+use the configured marker and bracket colours. Loaded related beads use current
+snapshot status. Shared rendering/click geometry and narrow/wide PTY coverage
+prevent three-column markers breaking related navigation. Extract stored-status
+support without the optional native adapter; run legacy detail tests unchanged.
 
 ## 6. Optional parent-child tree alongside the dependency graph
 
@@ -496,6 +513,16 @@ in `src/app/collection.rs`, snapshot activity fields and execution details.
 maintained adapter could reduce core conflicts, but adds a contract to maintain.
 Assess that trade-off before building a framework around one integration.
 
+**0.44.0 follow-up to proposal 9:** Missing models can be recovered passively from
+exact native worker sessions or an explicitly configured coordinator directory.
+Reads verify IDs, bound directory/body/cache sizes and preserve incremental scan
+progress across shared-owner lookups. Multiple beads may share a current owner;
+only explicit mismatches conflict. Distinguish worker from coordinator labels and
+identity from liveness/acceptance. Extraction must agree on the source protocol,
+keep paths/metadata/model aliases adapter-owned, and retain invented missing,
+ambiguous, partial, stale, budget, shared-owner and file-replacement tests. No
+agent reporting steps or tracker writes are introduced.
+
 ## 10. Portable missing-program test environments
 
 **Priority:** optional small test-only proposal; low product-diff reduction.
@@ -550,6 +577,12 @@ scope, exclusions and visibility as rendering. Profile per-edit projection befor
 making scalability claims. Reuse the invented PTY filter/arrow regression and
 source-preservation tests; complete the shared contribution gate.
 
+**0.44.0 follow-up to proposal 11:** Accepted nonblank filters remain visible and
+reopen at their saved query cursor; Esc restores the previous accepted filter,
+Home clears it, and whitespace does not filter. Extract as optional filter-mode
+behaviour, preserving upstream jump mode. Include retained-cursor, cancellation,
+clear and whitespace regressions, plus PTY navigation coverage.
+
 ## 12. Scroll the keybinding overlay
 
 **Tentative title:** `feat(tui): scroll keybinding help with arrow keys`
@@ -583,6 +616,13 @@ band geometry. Remove the fork legend/sticky-row dependency or explicitly stack
 proposal 2/5. Test smaller/larger/zero minimum, preview hidden/shown, resize, short
 and tall trees, content read sizes and tiny screens. Do not introduce mouse drag
 handling just to extract the setting. Complete the shared contribution gate.
+
+**0.44.0 follow-up to proposal 13:** Preview capture padding no longer produces
+false truncation marks. This can be a separate `fix(view)` patch without preview
+height configuration: trim only trailing plain spaces from styled capture spans,
+preserve meaningful content/styles and mark real clipping. Reproduce with invented
+padded SGR/plain rows, widths and genuine overflow; run existing preview tests and
+the shared contribution gate. No source terminal or Herdr controls are changed.
 
 ## Recommended extraction order and maintenance strategy
 

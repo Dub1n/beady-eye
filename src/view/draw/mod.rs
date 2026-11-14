@@ -416,12 +416,38 @@ pub(super) fn fitted(
     } else {
         line.prefix.clone()
     };
+    let prefix = if layout.compact && matches!(&line.content, Content::Project(_)) {
+        format!(" {prefix}")
+    } else if layout.compact && matches!(&line.content, Content::Group(_)) {
+        // Move even a tight elbow's arrow; reuse a following gap if present.
+        if let Some(at) = prefix.find(['▸', '▾', '>', 'v']) {
+            let arrow = prefix[at..].chars().next().unwrap();
+            let after = &prefix[at + arrow.len_utf8()..];
+            format!(
+                "{} {arrow}{}",
+                &prefix[..at],
+                after.strip_prefix(' ').unwrap_or(after)
+            )
+        } else {
+            prefix
+        }
+    } else {
+        prefix
+    };
     match &line.content {
         Content::Project(project) => project_line(project, &prefix, reads.of(project), reads.now),
         Content::Unread(unread) => unread_line(unread, &prefix, widths.of(&Cell::Id)),
         Content::Absent(absent) => absent_line(absent, &prefix, widths.of(&Cell::Id)),
         Content::Bead(row) | Content::Waiting(Waiting { row, .. }) => {
-            bead_line(row, &prefix, widths, layout)
+            if layout.compact && line.folded == Some(false) {
+                let mut row = row.clone();
+                let arrow = if layout.ascii { ">" } else { "▸" };
+                row.title = format!("{arrow} {}", row.title);
+                let prefix = prefix.replace('▸', "─").replace('>', "-");
+                bead_line(&row, &prefix, widths, layout)
+            } else {
+                bead_line(row, &prefix, widths, layout)
+            }
         }
         Content::Elided { count, .. } => elided_run(&prefix, *count),
         Content::Orphaned(orphaned) => orphaned_line(orphaned, &prefix, widths.of(&Cell::Id)),
@@ -1455,6 +1481,60 @@ mod compact_controls {
     }
 
     #[test]
+    fn collapsed_roots_have_a_hint_after_the_status_without_a_left_column() {
+        for ascii in [false, true] {
+            let mut forest = forest();
+            let layout = Layout {
+                ascii,
+                root_indent: RootIndent::Always,
+                ..Layout::default()
+            };
+            forest.laid_out_to(layout.clone());
+            let mut line = forest.lines().viewport(1, 1).next().unwrap().1.clone();
+            let Content::Bead(_) = &line.content else {
+                panic!("expected bead")
+            };
+            line.folded = Some(false);
+            let closed = Painted::of(
+                fitted(&line, forest.lines().widths(), &layout, &at_rest()),
+                80,
+                1,
+            )
+            .rows()
+            .remove(0);
+            assert!(
+                closed.starts_with("[~]")
+                    && closed[3..]
+                        .trim_start()
+                        .starts_with(if ascii { "> " } else { "▸ " }),
+                "{closed}"
+            );
+            line.folded = Some(true);
+            let open = Painted::of(
+                fitted(&line, forest.lines().widths(), &layout, &at_rest()),
+                80,
+                1,
+            )
+            .rows()
+            .remove(0);
+            assert!(open.starts_with("[~] "));
+            assert!(!open.contains(if ascii { ">" } else { "▸" }));
+            let project = forest.lines().viewport(0, 1).next().unwrap().1;
+            let heading = Painted::of(
+                fitted(project, forest.lines().widths(), &layout, &at_rest()),
+                80,
+                1,
+            )
+            .rows()
+            .remove(0);
+            assert!(
+                heading.starts_with(if ascii { " v " } else { " ▾ " }),
+                "{heading}"
+            );
+        }
+    }
+
+    #[test]
     fn root_indent_policy_covers_groups_panes_and_other_project_rows() {
         use crate::view::lines::{Group, GroupKind, Item};
         for ascii in [false, true] {
@@ -1498,7 +1578,10 @@ mod compact_controls {
                             .remove(0);
                             if hidden {
                                 assert!(
-                                    text.starts_with(lines::marker_with(open, ascii)),
+                                    text.starts_with(&format!(
+                                        " {}",
+                                        lines::marker_with(open, ascii).trim_end()
+                                    )),
                                     "{mode:?}: {text}"
                                 );
                             } else {

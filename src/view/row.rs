@@ -451,11 +451,7 @@ pub fn cells(
     Row {
         status: node.status.clone(),
         activity: node.activity.clone(),
-        activity_model: node
-            .activity
-            .as_ref()
-            .and_then(|a| a.model_label())
-            .map(str::to_owned),
+        activity_model: node.activity.as_ref().and_then(|a| a.owner_label()),
         activity_state: node
             .activity
             .as_ref()

@@ -98,3 +98,34 @@ fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
         }
     }
 }
+
+#[test]
+fn compact_detail_relations_use_brackets_at_narrow_and_wide_widths() {
+    for cols in [30, 60] {
+        for coloured in [false, true] {
+            let home = a_home_naming_one_project_settled(
+                &format!("detail-markers-{cols}-{coloured}"),
+                &format!("[row]\ncolour_brackets={coloured}\n"),
+            );
+            let tracker = ShimmedTracker::beside(&home);
+            tracker.holds(&serde_json::json!([
+                {"id":"ark-1","title":"Invented parent","status":"blocked"},
+                {"id":"ark-1.1","title":"Invented child","status":"in_progress","description":"See ark-2 for context.","dependencies":[{"depends_on_id":"ark-1","type":"parent-child"}]},
+                {"id":"ark-2","title":"Invented preparation","status":"hooked"}
+            ]).to_string());
+            let mut app = Driven::bdi(36, cols, home, &tracker.environment());
+            app.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+            app.read_until(b"Invented", GIVING_UP);
+            let seek = app.send(b"/ark-1.1\r ");
+            app.answer_to(seek, GIVING_UP);
+            let repaint = app.resize(37, cols);
+            let screen = app.answer_to(repaint, GIVING_UP);
+            let text = terminal::rows_drawn(&screen).join("\n");
+            assert!(text.contains("[~] ark-1.1"), "{text}");
+            assert!(text.contains("[?] ark-1"), "{text}");
+            assert!(text.contains("[<] ark-2"), "{text}");
+            assert!(terminal::window_over(&screen).is_some());
+            app.send(b"\x1bq");
+        }
+    }
+}
