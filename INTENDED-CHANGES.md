@@ -1,6 +1,31 @@
 # Intended changes: compact trees and passive agent activity
 
-Status: implemented in this fork (including the 0.43.0 follow-up checklist). This document remains the agreed design and
+## Orchestrator evidence follow-up
+
+### Correlation and work records
+
+- [ ] Resolve missing delegated child-session links only where current-attempt,
+  native task and independently verified host identities establish the link;
+  retain unknown and conflict states for incomplete or contradictory evidence.
+- [x] Audit existing work-record operations and provide a read-only diagnostic
+  and narrowly justified safeguards without changing acceptance semantics or
+  imposing extra agent reporting.
+- [x] Diagnose multiple worker receipts independently, with bounded traversal
+  and explicit duplicate or malformed receipt ambiguity.
+- [ ] Include diagnostic fixtures in the repository's Nix contribution checks.
+
+### Passive evidence and delivery
+
+- [x] Investigate native authentication and observer sources, optional change
+  sources, history and usage; implement only evidence-backed improvements.
+- [ ] Validate synthetic fixtures, real read-only records, authenticated live
+  streams and interactive views separately; document unavailable coverage.
+- [ ] Reconcile the fork guide and upstream extraction plan, review integration,
+  and deliver through the fork's contribution and installation workflow.
+
+Status: the earlier changes are implemented in this fork (including the 0.43.0
+follow-up checklist); the orchestrator evidence follow-up above is in progress.
+This document remains the agreed design and
 acceptance checklist. See [the fork guide](docs/passive-activity.md) for actual
 configuration and controls, and [the validation report](docs/validation-passive-activity.md)
 for tested coverage and platform/source limits. Upstream screenshots and optional

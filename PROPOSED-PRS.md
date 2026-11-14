@@ -777,3 +777,25 @@ Verify against supported real native versions, measure polling and connection
 cost, add cross-platform degradation tests, review privacy and endpoint identity,
 and complete the shared contribution gate. A passing synthetic protocol test
 does not establish live host compatibility or upstream CI acceptance.
+
+### Correlation safety and source diagnostics (proposal 16 follow-up)
+
+The fork scopes stream eligibility to `(project, full bead ID, attempt, task,
+child)` and requires the native parent to agree with the independently recorded
+attempt coordinator. An explicit child conflict remains a conflict; a childless
+receipt does not acquire stream liveness from a mutable task record. Fixed
+transport failure categories explain unavailable evidence without returning
+credentials or peer payloads. A separate, POSIX-only Python diagnostic consumes
+exported work records without writing the tracker and labels native children as
+unverified observations.
+
+Extraction depends on the provider and execution contracts in proposals 9 and
+16. The QR-Clip-shaped diagnostic is fork-specific, not an upstream default;
+discuss a generic adapter boundary before considering it upstream. Preserve
+upstream defaults, unsupported-platform degradation and existing JSON contracts.
+Invented tests cover cross-project collisions, replacement, missing and
+contradictory identities, transport failures, bounded reads and direct work.
+Before upstream contribution, independently verify supported native versions,
+authenticated live operation, provider identity semantics and a safe future
+dispatch-time child binding; complete the shared contribution gate. Existing
+childless receipts and an unavailable host remain explicit limitations.

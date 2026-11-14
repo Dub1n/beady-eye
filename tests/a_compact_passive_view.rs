@@ -9,7 +9,9 @@ use terminal::{a_home_naming_one_project_settled, ENTER_ALTERNATE_SCREEN};
 fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
     for colour_brackets in [true, false] {
         for cols in [30, 40, 60, 80] {
-            let settings = format!("[row]\ncompact=true\nshow_ids=false\nindent=2\nascii=true\ncolour_brackets={colour_brackets}\n");
+            let settings = format!(
+                "[row]\ncompact=true\nshow_ids=false\nindent=2\nascii=true\ncolour_brackets={colour_brackets}\n"
+            );
             let home = a_home_naming_one_project_settled(
                 &format!("compact-{cols}-{colour_brackets}"),
                 &settings,
@@ -38,7 +40,7 @@ fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
             tracker.holds(&serde_json::json!([{
             "id":"ark-invented","title":"Gateway","status":"in_progress","priority":2,"issue_type":"task",
             "metadata":{"qrclipWork":{"attempt":{"id":"invented-attempt","coordinator":"invented-owner","mode":"delegate"}},
-                "qrclipDispatch":{"attemptId":"invented-attempt","taskId":"st_invented","nativeStatus":"running"}}
+                "qrclipDispatch":{"attemptId":"invented-attempt","taskId":"st_invented","childSession":"invented-child","nativeStatus":"running"}}
         }]).to_string());
             let mut bdi = Driven::bdi(24, cols, home, &tracker.environment());
             bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
@@ -97,6 +99,92 @@ fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
             bdi.send(b"q");
         }
     }
+}
+
+#[test]
+fn childless_current_receipt_keeps_completed_native_record_unverified() {
+    let home = a_home_naming_one_project_settled(
+        "childless-native-receipt",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let config_path = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nacceptance_ready_path='metadata.reviewReady'\n",
+        tasks.display()
+    ));
+    std::fs::write(config_path, config).unwrap();
+
+    std::fs::write(
+        tasks.join("st_reused.json"),
+        serde_json::json!({
+            "task_id":"st_reused","status":"completed","parent_session_id":"invented-coordinator",
+            "child_session_id":"invented-old-child","name":"invented-old-worker","agent_type":"reviewer",
+            "effective_model":{"provider":"invented","model_id":"invented-model"},
+            "updated_at":chrono::Utc::now().to_rfc3339()
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(&serde_json::json!([{
+        "id":"ark-reused","title":"Invented gateway check","status":"in_progress","priority":2,"issue_type":"task",
+        "metadata":{
+            "qrclipWork":{
+                "attempt":{"id":"invented-current-attempt","coordinator":"invented-coordinator","mode":"delegate"},
+                "checked":{"attemptId":"invented-current-attempt","passed":true,"checkedAt":"2026-11-14T09:05:00Z"}
+            },
+            "qrclipDispatch":{"attemptId":"invented-current-attempt","taskId":"st_reused","nativeStatus":"completed"},
+            "reviewReady":{"attemptId":"invented-current-attempt","ready":true}
+        }
+    }]).to_string());
+
+    let mut bdi = Driven::bdi(30, 100, home, &tracker.environment());
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"[~]", GIVING_UP);
+    let seek = bdi.send(b"/ark-reused\r");
+    bdi.answer_to(seek, GIVING_UP);
+    let repaint = bdi.resize(31, 100);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("[~]"),
+        "unverified task stays uncertain: {text}"
+    );
+    assert!(
+        !text.contains("[T]"),
+        "unverified completion is not shown: {text}"
+    );
+    assert!(
+        !text.contains("[A]"),
+        "unverified record cannot show acceptance: {text}"
+    );
+    assert!(
+        !text.contains("invented-model"),
+        "unverified model stays hidden: {text}"
+    );
+
+    let detail = bdi.send(b"\r");
+    bdi.answer_to(detail, GIVING_UP);
+    let repaint = bdi.resize(32, 100);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let details = terminal::rows_drawn(&screen).join("\n");
+    assert_eq!(
+        terminal::window_over(&screen).as_deref(),
+        Some("ark-reused")
+    );
+    assert!(
+        details.contains("unverified") || details.contains("not attributed"),
+        "details explain why the reusable task record is uncertain: {details}"
+    );
+    assert!(
+        details.contains("completed") || details.contains("task status"),
+        "details retain the unverified record as evidence: {details}"
+    );
+    bdi.send(b"\x1bq");
 }
 
 #[test]

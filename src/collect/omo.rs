@@ -266,6 +266,8 @@ pub struct ActivityBatch {
     pub activities: BTreeMap<(String, String), Activity>,
 }
 
+type StreamKey = (String, String, String, String, String);
+
 /// Cached parsed task records. Call `collect` once per snapshot; repeated task IDs
 /// in the batch are read only once. Cache lifetime is the Reader lifetime.
 pub struct Reader {
@@ -273,7 +275,7 @@ pub struct Reader {
     records: BTreeMap<String, CachedRecord>,
     sessions: sessions::Sessions,
     streams: stream::Streams,
-    stream_eligible: BTreeMap<(String, String, String), bool>,
+    stream_eligible: BTreeMap<StreamKey, bool>,
 }
 
 /// Only collector metadata survives parsing. Unknown values (including nested
@@ -518,7 +520,12 @@ impl Reader {
             return;
         }
         let linked = if let Some(task) = &activity.task_id {
-            if !safe_id(task) {
+            if !safe_id(task)
+                || activity
+                    .child_session
+                    .as_deref()
+                    .is_none_or(|child| !safe_id(child))
+            {
                 return;
             }
             self.config.task_directory.parent().map(|parent| {
@@ -765,6 +772,8 @@ impl Reader {
         {
             conflicts.push("attempt mismatch");
         }
+        let attempt_coordinator = result.coordinator.clone();
+        let record_parent = text(&value, "parent_session_id");
         let record_coordinator =
             text(&value, "coordinator").or_else(|| text(&value, "parent_session_id"));
         if record_coordinator
@@ -773,6 +782,17 @@ impl Reader {
             .is_some_and(|(a, b)| a != b)
         {
             conflicts.push("coordinator mismatch");
+        }
+        if record_parent
+            .as_deref()
+            .zip(attempt_coordinator.as_deref())
+            .is_some_and(|(a, b)| a != b)
+            || record_parent
+                .as_deref()
+                .zip(record_coordinator.as_deref())
+                .is_some_and(|(a, b)| a != b)
+        {
+            conflicts.push("parent session mismatch");
         }
         let record_session = text(&value, "child_session_id");
         if record_session
@@ -787,6 +807,32 @@ impl Reader {
             result
                 .evidence
                 .extend(conflicts.into_iter().map(str::to_owned));
+            return result;
+        }
+        // A reusable task ID does not identify the child dispatched for this
+        // attempt. Optional task metadata and timestamps cannot replace that pin.
+        let explicit_child = field(dispatch, "childSession").and_then(string_value);
+        if !explicit_child.is_some_and(safe_id)
+            || record_session.as_deref() != explicit_child
+            || !attempt_coordinator.as_deref().is_some_and(safe_id)
+            || record_parent.as_deref() != attempt_coordinator.as_deref()
+        {
+            result.state = ActivityState::Unknown;
+            // Do not let session lookup promote a receipt whose readable task
+            // record cannot corroborate that receipt's child identity.
+            result.child_session = None;
+            result.evidence.push(
+                "native task is unverified: matching receipt child and independently recorded native parent are required; task status and identity are not attributed to this Bead".into(),
+            );
+            if let Some(status) = text(&value, "status") {
+                result.evidence.push(format!(
+                    "unverified reusable task file reports status: {}",
+                    bounded(status)
+                ));
+            }
+            if let Some(reason) = source_stale {
+                result.evidence.push(reason);
+            }
             return result;
         }
         result.effective_model = value
@@ -898,15 +944,18 @@ impl Reader {
                 .evidence
                 .push("closed Bead has a working current task".into());
         }
+        // Task IDs are reusable and durable tasks can change child sessions.
+        // Timestamps or an attempt alone cannot pin the dispatch-time child.
         if !last_known
-            && record_session.as_deref() == field(dispatch, "childSession").and_then(string_value)
+            && record_session.as_deref() == explicit_child
             && record_session.as_deref().is_some_and(safe_id)
-            && record_coordinator.as_deref() == result.coordinator.as_deref()
-            && record_coordinator.as_deref().is_some_and(safe_id)
+            && record_parent.as_deref() == attempt_coordinator.as_deref()
+            && attempt_coordinator.as_deref().is_some_and(safe_id)
+            && result.state != ActivityState::Conflict
         {
-            if let (Some(attempt), Some(child)) = (&result.attempt_id, &record_session) {
+            if let Some(key) = stream_key(&result) {
                 self.stream_eligible.insert(
-                    (attempt.clone(), task_id.clone(), child.clone()),
+                    key,
                     matches!(native_status.as_str(), "running" | "working")
                         && !input
                             .bead_status
@@ -1245,8 +1294,10 @@ fn safe_id(value: &str) -> bool {
         && value != ".."
 }
 
-fn stream_key(activity: &Activity) -> Option<(String, String, String)> {
+fn stream_key(activity: &Activity) -> Option<StreamKey> {
     Some((
+        activity.project.clone(),
+        activity.bead_id.clone(),
         activity.attempt_id.clone()?,
         activity.task_id.clone()?,
         activity.child_session.clone()?,
@@ -1416,6 +1467,92 @@ mod tests {
             "cached unreadable records cannot supply identity for promotion"
         );
     }
+    #[test]
+    fn stream_eligibility_is_scoped_to_project_and_full_bead() {
+        let mut reader = reader_with(record("running"));
+        let valid = input();
+        let mut missing_child = input_for("demo-2");
+        missing_child.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+        let mut other_project = missing_child.clone();
+        other_project.project = "other-project".into();
+        other_project.bead_id = valid.bead_id.clone();
+        let batch = reader.collect(&[valid, missing_child, other_project]);
+        assert_eq!(reader.stream_eligible.len(), 1);
+        for key in [("demo", "demo-2"), ("other-project", "demo-1")] {
+            let activity = &batch.activities[&(key.0.into(), key.1.into())].workers[0];
+            assert!(stream_key(activity).is_none());
+            assert_eq!(activity.state, ActivityState::Unknown);
+        }
+    }
+
+    #[test]
+    fn delayed_child_publication_and_task_replacement_recompute_eligibility() {
+        let mut reader = reader_with(record("running"));
+        let mut row = input();
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+        reader.collect(&[row.clone()]);
+        assert!(reader.stream_eligible.is_empty());
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = "session-1".into();
+        reader.collect(&[row.clone()]);
+        assert_eq!(reader.stream_eligible.len(), 1);
+        let mut replacement = record("running");
+        replacement["child_session_id"] = "replacement-child".into();
+        fs::write(
+            reader.config.task_directory.join("task-1.json"),
+            serde_json::to_vec(&replacement).unwrap(),
+        )
+        .unwrap();
+        let batch = reader.collect(&[row.clone()]);
+        assert!(reader.stream_eligible.is_empty());
+        assert_eq!(
+            batch.activities[&("demo".into(), "demo-1".into())].state,
+            ActivityState::Conflict
+        );
+        // Removing the pin must not silently adopt a durable task's new child,
+        // even when creation time falls within the receipt publication window.
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+        row.fields["metadata"]["qrclipDispatch"]["recordedAt"] = "2026-11-13T11:00:00Z".into();
+        reader.collect(&[row.clone()]);
+        assert!(reader.stream_eligible.is_empty());
+        row.fields["metadata"]["qrclipDispatch"]["attemptId"] = "prior-attempt".into();
+        reader.collect(&[row]);
+        assert!(reader.stream_eligible.is_empty());
+    }
+
+    #[test]
+    fn stream_parent_must_be_independently_recorded_and_consistent() {
+        let mut missing_owner = input();
+        missing_owner.fields["metadata"]["qrclipWork"]["attempt"]
+            .as_object_mut()
+            .unwrap()
+            .remove("coordinator");
+        let mut reader = reader_with(record("running"));
+        let batch = reader.collect(&[missing_owner]);
+        assert!(reader.stream_eligible.is_empty());
+        let worker = &batch.activities.values().next().unwrap().workers[0];
+        assert_eq!(worker.state, ActivityState::Unknown);
+        assert_eq!(worker.effective_model, None);
+        let mut missing_parent = record("completed");
+        missing_parent
+            .as_object_mut()
+            .unwrap()
+            .remove("parent_session_id");
+        let batch = reader_with(missing_parent).collect(&[input()]);
+        let worker = &batch.activities.values().next().unwrap().workers[0];
+        assert_eq!(worker.state, ActivityState::Unknown);
+        assert_eq!(worker.effective_model, None);
+        let mut conflicting = record("running");
+        conflicting["coordinator"] = "coord-1".into();
+        conflicting["parent_session_id"] = "other-parent".into();
+        let mut reader = reader_with(conflicting);
+        let batch = reader.collect(&[input()]);
+        assert!(reader.stream_eligible.is_empty());
+        assert_eq!(
+            batch.activities[&("demo".into(), "demo-1".into())].state,
+            ActivityState::Conflict
+        );
+    }
+
     fn multi_reader(statuses: &[&str]) -> (Reader, BeadInput) {
         let dir = temp_dir("multi");
         fs::create_dir_all(&dir).unwrap();
@@ -1447,6 +1584,46 @@ mod tests {
             row,
         )
     }
+    #[test]
+    fn unpinned_reused_task_never_supplies_execution_identity_or_readiness() {
+        for status in ["running", "completed", "failed", "cancelled"] {
+            for child in ["session-1", "replacement-child"] {
+                let mut value = record(status);
+                value["child_session_id"] = child.into();
+                let mut reader = reader_with(value);
+                reader.config.acceptance_ready_path = Some("metadata.readyForAcceptance".into());
+                let mut row = input();
+                row.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+                row.fields["metadata"]["readyForAcceptance"] =
+                    serde_json::json!({"attemptId":"attempt-1","ready":true});
+                row.fields["metadata"]["qrclipWork"]["checked"] =
+                    serde_json::json!({"attemptId":"attempt-1","passed":true});
+                let batch = reader.collect(&[row]);
+                let worker = &batch.activities.values().next().unwrap().workers[0];
+                assert_eq!(worker.state, ActivityState::Unknown);
+                assert_eq!(worker.effective_model, None);
+                assert_eq!(worker.child_session, None);
+                assert!(!worker.acceptance_ready);
+                assert!(worker.evidence.iter().any(|e| e.contains("unverified")));
+                assert!(reader.stream_eligible.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn native_child_is_required_even_when_task_metadata_names_current_attempt() {
+        let mut value = record("completed");
+        value.as_object_mut().unwrap().remove("child_session_id");
+        value["project"] = "demo".into();
+        value["bead_id"] = "demo-1".into();
+        value["attempt_id"] = "attempt-1".into();
+        let batch = reader_with(value).collect(&[input()]);
+        let worker = &batch.activities.values().next().unwrap().workers[0];
+        assert_eq!(worker.state, ActivityState::Unknown);
+        assert_eq!(worker.effective_model, None);
+        assert!(!worker.acceptance_ready);
+    }
+
     #[test]
     fn direct_session_identity_does_not_claim_execution_or_acceptance() {
         let dir = temp_dir("direct-session");
@@ -1523,8 +1700,25 @@ mod tests {
             .into_values()
             .next()
             .unwrap();
-        assert_eq!(activity.model_label(), Some("Luna"));
-        assert_eq!(activity.child_session.as_deref(), Some("worker-session"));
+        assert_eq!(activity.model_label(), None);
+        assert_eq!(activity.child_session, None);
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = "worker-session".into();
+        let pinned = reader.collect(&[row.clone()]);
+        let pinned = pinned.activities.values().next().unwrap();
+        assert_eq!(pinned.model_label(), Some("Luna"));
+        assert_eq!(pinned.child_session.as_deref(), Some("worker-session"));
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        let mut partial = record("completed");
+        partial.as_object_mut().unwrap().remove("child_session_id");
+        fs::write(
+            root.join("tasks/task-1.json"),
+            serde_json::to_vec(&partial).unwrap(),
+        )
+        .unwrap();
+        let partial = reader.collect(&[row.clone()]);
+        let partial = partial.activities.values().next().unwrap();
+        assert_eq!(partial.effective_model, None);
+        assert_eq!(partial.state, ActivityState::Unknown);
         assert_eq!(activity.state, ActivityState::Unknown);
         assert!(!activity.acceptance_ready);
         row.fields["metadata"]["qrclipDispatch"]["attemptId"] = "old-attempt".into();

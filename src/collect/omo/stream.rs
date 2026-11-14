@@ -85,7 +85,16 @@ impl Streams {
                 }
             }
             _ => {
-                activity.evidence.push("passive worker status unavailable, disconnected, pending verification, or identity mismatch; no stream liveness; file evidence retained".into());
+                #[cfg(target_os = "linux")]
+                let reason = activity
+                    .coordinator
+                    .as_ref()
+                    .and_then(|owner| self.hosts.get(owner))
+                    .map(linux::Host::unavailable_reason)
+                    .unwrap_or("coordinator status host not observed");
+                #[cfg(not(target_os = "linux"))]
+                let reason = "native status transport unsupported on this platform";
+                activity.evidence.push(format!("passive worker status unavailable: {reason}; no stream liveness; file evidence retained"));
             }
         }
     }
@@ -144,29 +153,76 @@ mod linux {
     const RECORDS: usize = 256;
     const DEADLINE: Duration = Duration::from_secs(30);
 
+    // Fixed diagnostics never contain peer payloads, credentials or paths.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum Failure {
+        #[default]
+        Discovery,
+        Credential,
+        Authentication,
+        Identity,
+        Protocol,
+        Disconnected,
+        Timeout,
+    }
+    impl Failure {
+        fn reason(self) -> &'static str {
+            match self {
+                Self::Discovery => "endpoint discovery or verification failed",
+                Self::Credential => {
+                    "advertised credential missing, unreadable, unsafe or identity-invalid"
+                }
+                Self::Authentication => "server proof or authentication response rejected",
+                Self::Identity => "host, registry or peer identity no longer verified",
+                Self::Protocol => "status protocol, sequence or bounds validation failed",
+                Self::Disconnected => "status transport disconnected or I/O failed",
+                Self::Timeout => "status observation or handshake expired",
+            }
+        }
+    }
     #[derive(Default)]
     pub(super) struct Host {
         pub(super) connection: Option<Connection>,
         retry: Option<Instant>,
+        failure: Failure,
     }
     impl Host {
+        pub(super) fn unavailable_reason(&self) -> &'static str {
+            match &self.connection {
+                Some(c) if c.ready() => {
+                    "worker session absent or parent/kind identity mismatch in verified snapshot"
+                }
+                Some(_) => "status handshake pending verification",
+                None => self.failure.reason(),
+            }
+        }
         pub(super) fn refresh(&mut self, config: &OmoConfig, owner: &str) {
             let now = Instant::now();
             if self.connection.as_ref().is_some_and(|c| now > c.expires) {
                 self.connection = None;
+                self.failure = Failure::Timeout;
                 self.retry = None;
             }
             if self.connection.is_none() && self.retry.is_none_or(|at| now >= at) {
                 self.retry = Some(now + Duration::from_secs(5));
                 self.connection = discover(config, owner).ok();
+                if self.connection.is_none() {
+                    self.failure = Failure::Discovery;
+                }
             }
-            if self
-                .connection
-                .as_mut()
-                .is_some_and(|c| !c.registry_matches(config, owner) || c.advance().is_err())
-            {
-                self.connection = None;
-                self.retry = Some(now + Duration::from_secs(5));
+            if let Some(connection) = self.connection.as_mut() {
+                let failure = if !connection.registry_matches(config, owner) {
+                    Some(Failure::Identity)
+                } else if connection.advance().is_err() {
+                    Some(connection.failure)
+                } else {
+                    None
+                };
+                if let Some(failure) = failure {
+                    self.failure = failure;
+                    self.connection = None;
+                    self.retry = Some(now + Duration::from_secs(5));
+                }
             }
         }
     }
@@ -177,6 +233,7 @@ mod linux {
         Live,
     }
     pub(super) struct Connection {
+        failure: Failure,
         socket: UnixStream,
         endpoint: PathBuf,
         key_root: PathBuf,
@@ -234,13 +291,16 @@ mod linux {
                     revents: 0,
                 };
                 if unsafe { libc::poll(&mut fd, 1, 2) } < 0 {
+                    self.failure = Failure::Disconnected;
                     return Err(());
                 }
             }
             Ok(())
         }
         fn pump(&mut self) -> Result<(), ()> {
+            self.failure = Failure::Protocol;
             if Instant::now() > self.expires || (!self.ready() && Instant::now() > self.deadline) {
+                self.failure = Failure::Timeout;
                 return Err(());
             }
             // Peer identity is checked before even the protocol probe leaves.
@@ -260,16 +320,23 @@ mod linux {
                 || process(self.owner_pid).map(|(_, start)| start) != Ok(self.owner_start)
                 || !descends(self.pid, self.owner_pid)
             {
+                self.failure = Failure::Identity;
                 return Err(());
             }
             let mut budget = FRAME;
             for _ in 0..RECORDS {
                 while self.sent < self.output.len() {
                     match self.socket.write(&self.output[self.sent..]) {
-                        Ok(0) => return Err(()),
+                        Ok(0) => {
+                            self.failure = Failure::Disconnected;
+                            return Err(());
+                        }
                         Ok(n) => self.sent += n,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-                        Err(_) => return Err(()),
+                        Err(_) => {
+                            self.failure = Failure::Disconnected;
+                            return Err(());
+                        }
                     }
                 }
                 if let Some(end) = self.input.iter().position(|b| *b == b'\n') {
@@ -286,19 +353,26 @@ mod linux {
                     return Err(());
                 }
                 match self.socket.read(&mut bytes[..cap]) {
-                    Ok(0) => return Err(()),
+                    Ok(0) => {
+                        self.failure = Failure::Disconnected;
+                        return Err(());
+                    }
                     Ok(n) => {
                         self.input.extend_from_slice(&bytes[..n]);
                         budget -= n;
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-                    Err(_) => return Err(()),
+                    Err(_) => {
+                        self.failure = Failure::Disconnected;
+                        return Err(());
+                    }
                 }
             }
             // A peer flooding the connection must not retain an old live view.
             Err(())
         }
         fn record(&mut self, line: &[u8]) -> Result<(), ()> {
+            self.failure = Failure::Protocol;
             #[derive(Deserialize)]
             struct Envelope<'a> {
                 #[serde(rename = "type")]
@@ -342,6 +416,13 @@ mod linux {
                 || envelope.id != Some(expected)
                 || envelope.success != Some(true)
             {
+                if matches!(self.phase, Phase::Authenticate)
+                    && envelope.kind == "response"
+                    && envelope.id == Some("auth")
+                    && envelope.success == Some(false)
+                {
+                    self.failure = Failure::Authentication;
+                }
                 return Err(());
             }
             match &self.phase {
@@ -369,7 +450,8 @@ mod linux {
                     if !super::super::safe_id(&auth.launch_id) || auth.launch_id.len() > 64 {
                         return Err(());
                     }
-                    let key = key(&self.key_root, &auth.launch_id, &self.endpoint, self.pid)?;
+                    let key = key(&self.key_root, &auth.launch_id, &self.endpoint, self.pid)
+                        .inspect_err(|_| self.failure = Failure::Credential)?;
                     let proof = hex_decode(&auth.server_proof)?;
                     hex_decode(&auth.server_nonce)?;
                     let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|_| ())?;
@@ -380,7 +462,9 @@ mod linux {
                         )
                         .as_bytes(),
                     );
-                    mac.verify_slice(&proof).map_err(|_| ())?;
+                    mac.verify_slice(&proof).map_err(|_| {
+                        self.failure = Failure::Authentication;
+                    })?;
                     let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|_| ())?;
                     mac.update(
                         format!(
@@ -721,6 +805,7 @@ mod linux {
             .map_err(|_| ())?;
         let nonce = hex(&nonce);
         let mut connection = Connection {
+            failure: Failure::Protocol,
             socket,
             endpoint: meta.socket.clone(),
             key_root: root,
@@ -911,6 +996,7 @@ mod linux {
             peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
             let pid = std::process::id();
             let connection = Connection {
+                failure: Failure::Protocol,
                 socket,
                 endpoint: root.0.join("rpc/shards/p-test.sock"),
                 key_root: root.0.clone(),
@@ -941,6 +1027,55 @@ mod linux {
         fn snapshot(c: &mut Connection) {
             c.phase = Phase::Subscribe;
             record(c,serde_json::json!({"type":"response","id":"subscribe","success":true,"data":{"subscriptionId":"sub-1","seq":0,"hostInstanceId":"instance-1","hostGeneration":"0","snapshot":[wire(0,"child-1")]}})).unwrap();
+        }
+
+        #[test]
+        fn diagnostics_preserve_uncertainty_and_never_echo_peer_errors() {
+            let (_root, mut c, _peer) = fixture();
+            c.phase = Phase::Authenticate;
+            record(&mut c, serde_json::json!({"type":"response", "id":"auth", "success":false, "error":"invented private payload"})).unwrap_err();
+            assert_eq!(c.failure, Failure::Authentication);
+            assert!(c.output.is_empty());
+            let mut host = Host {
+                connection: None,
+                retry: Some(Instant::now() + Duration::from_secs(5)),
+                failure: c.failure,
+            };
+            host.refresh(&OmoConfig::default(), "owner-1");
+            assert_eq!(host.unavailable_reason(), Failure::Authentication.reason());
+            host.connection = Some(c);
+            assert_eq!(
+                host.unavailable_reason(),
+                "status handshake pending verification"
+            );
+            snapshot(host.connection.as_mut().unwrap());
+            assert_eq!(
+                host.unavailable_reason(),
+                "worker session absent or parent/kind identity mismatch in verified snapshot"
+            );
+            host.connection = None;
+            host.retry = None;
+            host.refresh(&OmoConfig::default(), "owner-1");
+            assert_eq!(
+                host.unavailable_reason(),
+                "endpoint discovery or verification failed"
+            );
+        }
+
+        #[test]
+        fn transport_failures_distinguish_closed_peer_expiry_and_peer_identity() {
+            let (_root, mut c, peer) = fixture();
+            drop(peer);
+            assert!(c.pump().is_err());
+            assert_eq!(c.failure, Failure::Disconnected);
+            let (_root, mut c, _peer) = fixture();
+            c.deadline = Instant::now() - Duration::from_secs(1);
+            assert!(c.pump().is_err());
+            assert_eq!(c.failure, Failure::Timeout);
+            let (_root, mut c, _peer) = fixture();
+            c.owner_start = c.owner_start.wrapping_add(1);
+            assert!(c.pump().is_err());
+            assert_eq!(c.failure, Failure::Identity);
         }
 
         #[test]
@@ -1069,9 +1204,11 @@ mod linux {
             let mut forged = challenge.clone();
             forged["data"]["auth"]["server_proof"] = "00".repeat(32).into();
             assert!(record(&mut c, forged).is_err());
+            assert_eq!(c.failure, Failure::Authentication);
             assert!(c.output.is_empty());
             fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
             assert!(record(&mut c, challenge.clone()).is_err());
+            assert_eq!(c.failure, Failure::Credential);
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
             peer.write_all(&serde_json::to_vec(&challenge).unwrap())
                 .unwrap();
@@ -1104,6 +1241,7 @@ mod linux {
             let (_root, mut c, _peer) = fixture();
             let challenge = serde_json::json!({"id":"protocol","type":"response","success":true,"data":{"capabilities":["socket_auth","session_status","observe_reads"],"auth":{"launch_id":"missing-launch","server_nonce":"33".repeat(32),"server_proof":"00".repeat(32)}}});
             assert!(record(&mut c, challenge).is_err());
+            assert_eq!(c.failure, Failure::Credential);
             assert!(c.output.is_empty());
             assert!(key(&c.key_root, "missing-launch", &c.endpoint, c.pid).is_err());
             assert!(hex_decode(&"AA".repeat(32)).is_err());
@@ -1117,6 +1255,7 @@ mod linux {
             assert!(c.statuses.contains_key("child-2"));
             assert!(record(&mut c, wire(1, "child-2")).is_err());
             assert!(record(&mut c, wire(3, "child-2")).is_err());
+            assert_eq!(c.failure, Failure::Protocol);
             let mut foreign = wire(2, "child-2");
             foreign["subscriptionId"] = "other".into();
             assert!(record(&mut c, foreign).is_err());
@@ -1138,6 +1277,7 @@ mod linux {
             let mut host = Host {
                 connection: Some(c),
                 retry: None,
+                failure: Failure::Discovery,
             };
             host.refresh(&OmoConfig::default(), "owner-1");
             assert!(host.connection.is_none());
@@ -1156,6 +1296,7 @@ mod linux {
                 Host {
                     connection: Some(c),
                     retry: None,
+                    failure: Failure::Discovery,
                 },
             );
             let mut activity =
