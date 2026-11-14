@@ -628,6 +628,7 @@ fn said_styled(
         if matches!(
             agent.source,
             crate::model::join::JoinSource::NativeWorker
+                | crate::model::join::JoinSource::NativeOwner
                 | crate::model::join::JoinSource::NativeCoordinator
         ) {
             rows.push(indented(vec![Span::raw(format!(
@@ -637,6 +638,8 @@ fn said_styled(
                 agent.agent_session.as_deref().unwrap_or("unknown"),
                 if agent.source == crate::model::join::JoinSource::NativeCoordinator {
                     "live coordinator"
+                } else if agent.source == crate::model::join::JoinSource::NativeOwner {
+                    "live direct owner"
                 } else {
                     "live worker/direct owner"
                 }
@@ -649,7 +652,15 @@ fn said_styled(
             "EXECUTION (stored bead status unchanged)",
             palette::TITLE,
         )]);
-        let mut facts = vec![format!("State: {}", activity.state_label())];
+        let mut facts = vec![
+            format!("State: {}", activity.state_label()),
+            format!(
+                "Execution: {:?}; assigned: {}; live agent: {}",
+                node.execution_state(),
+                node.assigned(),
+                node.agent_live()
+            ),
+        ];
         for (label, value) in [
             ("Model", activity.effective_model.as_deref()),
             ("Worker", activity.worker_name.as_deref()),

@@ -476,3 +476,27 @@ sources that cannot be associated safely. Unlinked native work remains visible.
 These links require no metadata writes, changes to AGENTS.md, hooks, agents'
 reporting duties or pane lifecycle control. Every collection rechecks the live
 pane set, so an ended/missing terminal does not stay live through an old link.
+
+## Assignment and execution
+
+`assigned`, `agent_live`, `execution`, and `active` are separate fields in both
+JSON outputs. `execution` is `active`, `inactive`, or `unknown`; `active` is
+true, false, or null respectively. A fresh running native task for the current
+attempt provides active evidence. A terminal task result provides inactive
+evidence; stale, missing or conflicting evidence remains unknown. A hooked
+`[<]` bead can therefore be active. The Activity scope also includes attention
+work; select `active == true` in JSON for the strict execution set.
+
+Compact labels show `active` for proven execution, `idle` for an idle pane,
+`coord live` for a busy coordinator, and `owner live · ?` when a busy direct
+owner has no bead-specific execution evidence. The role, execution state and
+pane state remain independent. A coordinator can be idle while a delegated
+worker is active; both facts are shown. Details retain the underlying evidence.
+
+Optionally configure an absolute `runtime_directory` under `[omo.<project>]`,
+with `session_directory` also configured, to resolve an OmO session switch in
+an existing process. On Linux, the reader checks a bounded registry against the
+foreground PID and its lifetime, project task store, a bound native socket and
+the session file header. Ambiguous or unavailable evidence leaves the live
+session unknown. Canonical provider-reported IDs retain priority. No chat text,
+agent instructions, tracker writes or native socket requests are used.

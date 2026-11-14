@@ -183,7 +183,10 @@ fn live_native_owners_are_visible_on_beads_and_open_their_linked_details() {
         let repaint = app.resize(29, cols);
         let screen = app.answer_to(repaint, GIVING_UP);
         let text = terminal::rows_drawn(&screen).join("\n");
-        assert!(text.contains("@ coord"), "{cols}: {text}");
+        assert!(text.contains("@ model-a"), "{cols}: {text}");
+        if cols >= 60 {
+            assert!(text.contains("coord live"), "{text}");
+        }
         assert!(!text.contains("unclaimed pane"), "{text}");
         let detail = app.send(b"\r");
         app.answer_to(detail, GIVING_UP);

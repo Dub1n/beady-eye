@@ -215,7 +215,7 @@ fn native_live_owners_join_before_snapshot_build_and_link_bead_preview_without_e
         assert_eq!(
             agent.source,
             if node.id == "ark-1" {
-                JoinSource::NativeWorker
+                JoinSource::NativeOwner
             } else {
                 JoinSource::NativeCoordinator
             }
@@ -225,9 +225,9 @@ fn native_live_owners_join_before_snapshot_build_and_link_bead_preview_without_e
         assert_eq!(
             row.live_agent_state.as_deref(),
             Some(if node.id == "ark-1" {
-                "working"
+                "owner live · ?"
             } else {
-                "coord working"
+                "coord live · ?"
             })
         );
         forest.go_to(&node.key());

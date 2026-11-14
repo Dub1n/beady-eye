@@ -200,18 +200,22 @@ fn agent_list(runner: &dyn Runner, session: &str) -> Result<Vec<Pane>, RunFailur
             None,
             &Env::new(),
         ) {
+            pane.process_id = process_id(pane, &out);
             pane.agent_session = process_session(pane, &out);
         }
     }
     Ok(panes)
 }
 
+fn process_id(pane: &Pane, text: &str) -> Option<u32> {
+    u32::try_from(native_process(pane, text)?.get("pid")?.as_u64()?)
+        .ok()
+        .filter(|pid| *pid > 0)
+}
+
 /// A process identity is valid only for this pane's one exact OmO process.
-fn process_session(pane: &Pane, text: &str) -> Option<AgentSession> {
-    if pane.app.as_deref() != Some("omo")
-        || pane.agent.is_none()
-        || pane.agent_session_id().is_some()
-    {
+fn native_process(pane: &Pane, text: &str) -> Option<serde_json::Value> {
+    if pane.app.as_deref() != Some("omo") || pane.agent.is_none() {
         return None;
     }
     if text.len() > 256 * 1024 {
@@ -250,6 +254,14 @@ fn process_session(pane: &Pane, text: &str) -> Option<AgentSession> {
     if process.get("cwd")?.as_str()? != pane.cwd.to_str()? {
         return None;
     }
+    Some((*process).clone())
+}
+
+fn process_session(pane: &Pane, text: &str) -> Option<AgentSession> {
+    if pane.agent_session_id().is_some() {
+        return None;
+    }
+    let process = native_process(pane, text)?;
     let argv = process.get("argv")?.as_array()?;
     if std::path::Path::new(argv.first()?.as_str()?)
         .file_name()?
@@ -774,7 +786,7 @@ mod tests {
         );
     }
     fn invented_omo_process() -> serde_json::Value {
-        serde_json::json!({"result":{"process_info":{"pane_id":"w:p1","foreground_processes":[{"cwd":"/srv/arkham","argv":["/opt/omo","--session","owner-a"]}]}}})
+        serde_json::json!({"result":{"process_info":{"pane_id":"w:p1","foreground_processes":[{"pid":1234,"cwd":"/srv/arkham","argv":["/opt/omo","--session","owner-a"]}]}}})
     }
     fn invented_omo_pane() -> Pane {
         let mut pane = Pane::answered(

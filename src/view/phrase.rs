@@ -776,6 +776,7 @@ pub fn pane_unreadable(kind: FailureKind) -> &'static str {
 pub fn join_caveat(source: JoinSource) -> Option<&'static str> {
     match source {
         JoinSource::AgentSession | JoinSource::AgentPane | JoinSource::NativeWorker => None,
+        JoinSource::NativeOwner => Some("direct owner"),
         JoinSource::NativeCoordinator => Some("coordinator, not worker execution"),
         JoinSource::DisplayAgent => Some("inferred, not confirmed"),
     }

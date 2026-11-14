@@ -321,6 +321,10 @@ fn a_node_carries_every_field_the_contract_names() {
                 "drawn_on": "own",
             }],
             "agent": null,
+            "execution": "unknown",
+            "active": null,
+            "assigned": false,
+            "agent_live": false,
             "anomalies": [],
             "orphaned_dependencies": [],
         })

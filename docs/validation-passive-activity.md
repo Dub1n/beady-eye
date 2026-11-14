@@ -365,3 +365,27 @@ all five tests passed. Production/all-target Clippy with warnings denied,
 formatting and the three extracted source scans passed. The canonical installed
 binary reports 0.45.0. Live JSON validation and invented PTY coverage are separate
 from exercising the user's interactive viewer after reopening it.
+
+## 0.46.0 independent execution and session switches
+
+A read-only investigation found current attempts referring to a newer logical
+session than the live process's launch argument. The native registry identifies
+the current session by process PID; verification now additionally requires the
+same process lifetime, project store, registered and bound socket inode, and
+matching session header. Native hard-link and symlink socket layouts are covered.
+Ambiguous or unsupported evidence clears the launch-ID fallback. Canonical
+provider IDs remain authoritative. The configured registry was added after a
+local config backup; no tracker or agent workflow was modified.
+
+The source snapshot changed during validation: two previously reported attempts
+closed and a third remained open without an attempt or assignee. A later live
+JSON read linked seven current beads to the live pane, with no runtime-identity
+errors: one active, three inactive and three unknown. This is a point-in-time
+read, not a claim about the earlier agent message or simultaneous execution.
+No real IDs, paths or session records are included in test fixtures.
+
+The full Cargo suite passed 2,820 tests with 3 ignored; after the socket-layout
+fix all five focused runtime tests passed. All-target Clippy, formatting and
+available extracted source scans passed. Real terminal tests and a state matrix
+cover idle/live/active labels; Linux live JSON was checked separately. Nix,
+macOS and a newly reopened interactive Herdr pane were not exercised.

@@ -28,6 +28,8 @@ pub enum JoinSource {
     DisplayAgent,
     /// Exact native worker/direct session, matched to a current live pane.
     NativeWorker,
+    /// A direct attempt owner, independently of per-bead execution evidence.
+    NativeOwner,
     /// Exact coordinator session; this does not assert delegated worker liveness.
     NativeCoordinator,
 }

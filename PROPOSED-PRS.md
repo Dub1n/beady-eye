@@ -726,3 +726,22 @@ update an existing proposal or add an independent candidate here. This catalogue
 now includes the tree/search increment tracked in [INTENDED-CHANGES.md](INTENDED-CHANGES.md).
 Implementation completion does not waive any upstream reproduction, maintainer
 discussion, extraction, validation or actual CI requirements above.
+
+## 16. Separate execution evidence from agent presence
+
+The fork now exposes independent `assigned`, `agent_live`, `execution` and
+nullable `active` snapshot/listing fields and labels idle, live, active and
+unknown states separately. Current-attempt fresh native running evidence drives
+execution; terminal records are inactive and missing or stale records unknown.
+Hooked status remains independent. Before upstream extraction, agree on a generic
+provider contract and JSON compatibility; extract display/serialization from the
+optional native adapter and preserve upstream defaults. Test mixed workers,
+stale and conflicting records, idle panes, headless workers and narrow rows.
+
+The optional switched-session resolver belongs with proposal 15 or its native
+adapter: it checks a bounded, explicitly configured registry against PID lifetime,
+project store, bound socket and session header. Establish a supported native
+protocol or ask the provider to report current IDs before upstreaming. Preserve
+canonical ID priority, reject ambiguity and unsupported platforms, and cover PID
+reuse, stale sockets, malformed headers and multiple current sessions. Complete
+the shared contribution gate with invented fixtures.

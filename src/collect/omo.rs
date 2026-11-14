@@ -13,7 +13,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+mod runtime;
 mod sessions;
+pub use runtime::resolve_runtime_session;
 
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const MAX_BATCH_RECORDS: usize = 256;
@@ -28,6 +30,8 @@ pub struct OmoConfig {
     pub task_directory: PathBuf,
     /// Exact project session-log directory for direct coordinator identity.
     pub session_directory: Option<PathBuf>,
+    /// Explicit native RPC registry for resolving in-process session switches.
+    pub runtime_directory: Option<PathBuf>,
     /// Beads metadata path to the active attempt ID.
     pub attempt_path: String,
     /// Beads metadata path to the dispatch receipt object.
@@ -47,6 +51,7 @@ impl Default for OmoConfig {
         Self {
             task_directory: PathBuf::new(),
             session_directory: None,
+            runtime_directory: None,
             attempt_path: "metadata.qrclipWork.attempt".into(),
             dispatch_path: "metadata.qrclipDispatch".into(),
             acceptance_ready_path: None,
@@ -69,6 +74,13 @@ impl OmoConfig {
             .is_some_and(|path| !path.is_absolute())
         {
             return Err("OmO session_directory must be an absolute path");
+        }
+        if self
+            .runtime_directory
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute())
+        {
+            return Err("OmO runtime_directory must be an absolute path");
         }
         if self.attempt_path.is_empty()
             || self.dispatch_path.is_empty()
@@ -93,6 +105,15 @@ pub enum ActivityState {
     Cancelled,
     Unknown,
     Conflict,
+}
+
+/// Execution evidence is independent of ownership and terminal activity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionState {
+    Active,
+    Inactive,
+    Unknown,
 }
 
 /// State, identity, provenance and evidence for one bead's current activity.
@@ -148,6 +169,47 @@ impl Activity {
                     .as_deref()
                     .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
             })
+    }
+
+    /// A fresh matched running task is positive execution evidence. A busy
+    /// terminal, old receipt or stored in-progress status is not.
+    pub fn execution_state(&self) -> ExecutionState {
+        if self.attempt_id.as_deref().is_none_or(str::is_empty)
+            || self.state == ActivityState::Conflict
+        {
+            return ExecutionState::Unknown;
+        }
+        if !self.workers.is_empty() {
+            let mut unknown = false;
+            for worker in &self.workers {
+                let state = if worker.attempt_id != self.attempt_id {
+                    ExecutionState::Unknown
+                } else {
+                    worker.execution_state()
+                };
+                if state == ExecutionState::Active {
+                    return ExecutionState::Active;
+                }
+                unknown |= state == ExecutionState::Unknown;
+            }
+            return if unknown {
+                ExecutionState::Unknown
+            } else {
+                ExecutionState::Inactive
+            };
+        }
+        match self.state {
+            ActivityState::Working if self.fresh == Some(true) => ExecutionState::Active,
+            ActivityState::Finished
+            | ActivityState::AwaitingAcceptance
+            | ActivityState::Failed
+            | ActivityState::Cancelled
+                if self.fresh != Some(false) =>
+            {
+                ExecutionState::Inactive
+            }
+            _ => ExecutionState::Unknown,
+        }
     }
 
     /// Human-readable state for a detail pane.
@@ -1642,5 +1704,61 @@ mod tests {
             .clone();
         assert_eq!(activity.state, ActivityState::Failed);
         assert_eq!(activity.fresh, None);
+    }
+    #[test]
+    fn execution_requires_fresh_current_attempt_evidence_and_preserves_unknown() {
+        let mut activity = empty_activity(&input());
+        activity.attempt_id = Some("attempt-a".into());
+        for (state, fresh, expected) in [
+            (ActivityState::Working, Some(true), ExecutionState::Active),
+            (ActivityState::Working, Some(false), ExecutionState::Unknown),
+            (ActivityState::Working, None, ExecutionState::Unknown),
+            (ActivityState::Finished, None, ExecutionState::Inactive),
+            (
+                ActivityState::Finished,
+                Some(false),
+                ExecutionState::Unknown,
+            ),
+            (
+                ActivityState::AwaitingAcceptance,
+                None,
+                ExecutionState::Inactive,
+            ),
+            (ActivityState::Failed, None, ExecutionState::Inactive),
+            (ActivityState::Cancelled, None, ExecutionState::Inactive),
+            (ActivityState::Unknown, None, ExecutionState::Unknown),
+            (ActivityState::Conflict, Some(true), ExecutionState::Unknown),
+        ] {
+            activity.state = state;
+            activity.fresh = fresh;
+            assert_eq!(activity.execution_state(), expected);
+        }
+        activity.state = ActivityState::Working;
+        activity.fresh = Some(true);
+        activity.attempt_id = None;
+        assert_eq!(activity.execution_state(), ExecutionState::Unknown);
+        activity.attempt_id = Some(String::new());
+        assert_eq!(activity.execution_state(), ExecutionState::Unknown);
+    }
+    #[test]
+    fn mixed_workers_use_current_positive_execution_even_with_other_unknown_workers() {
+        let mut active = empty_activity(&input());
+        active.attempt_id = Some("attempt-a".into());
+        active.state = ActivityState::Working;
+        active.fresh = Some(true);
+        let mut unknown = active.clone();
+        unknown.fresh = Some(false);
+        let mut parent = active.clone();
+        parent.fresh = Some(false);
+        parent.workers = vec![unknown.clone(), active.clone()];
+        assert_eq!(parent.execution_state(), ExecutionState::Active);
+        parent.workers[1].attempt_id = Some("previous-attempt".into());
+        assert_eq!(parent.execution_state(), ExecutionState::Unknown);
+        parent.workers.iter_mut().for_each(|w| {
+            w.attempt_id = Some("attempt-a".into());
+            w.state = ActivityState::Finished;
+            w.fresh = None;
+        });
+        assert_eq!(parent.execution_state(), ExecutionState::Inactive);
     }
 }

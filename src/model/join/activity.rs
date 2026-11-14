@@ -28,7 +28,7 @@ pub fn connect_activity(
     }
     for (key, activity) in activities {
         if !eligible.contains(key)
-            || activity.attempt_id.is_none()
+            || activity.attempt_id.as_deref().is_none_or(str::is_empty)
             || activity.state == ActivityState::Conflict
         {
             continue;
@@ -39,6 +39,16 @@ pub fn connect_activity(
         };
         if joined.refused.contains_key(&bead) {
             continue;
+        }
+        for pane in panes
+            .iter()
+            .filter(|p| project_of(p, &cfg.projects).is_some_and(|p| p.name == key.0))
+        {
+            if let Some(error) = pane.state_labels.get("bdi-session-identity") {
+                activity
+                    .evidence
+                    .push(format!("live identity unavailable: {error}"));
+            }
         }
         let mut candidates = Vec::new();
         let workers: Vec<_> = if activity.workers.is_empty() {
@@ -56,7 +66,14 @@ pub fn connect_activity(
                     .flatten()
             });
             if let Some(session) = worker_session {
-                candidates.push((session.to_owned(), JoinSource::NativeWorker));
+                let role = if worker.worker_type.as_deref() == Some("direct")
+                    && worker.child_session.is_none()
+                {
+                    JoinSource::NativeOwner
+                } else {
+                    JoinSource::NativeWorker
+                };
+                candidates.push((session.to_owned(), role));
             }
         }
         if let Some(session) = &activity.coordinator {
@@ -95,22 +112,25 @@ pub fn connect_activity(
             linked.push(agent_ref(pane, source));
         }
         if let Some(primary) = linked.first() {
-            if primary.source == JoinSource::NativeWorker
-                && joined.agents.get(&bead).is_some_and(|old| {
-                    old.pane != primary.pane && old.source != JoinSource::DisplayAgent
-                })
-            {
+            if matches!(
+                primary.source,
+                JoinSource::NativeWorker | JoinSource::NativeOwner
+            ) && joined.agents.get(&bead).is_some_and(|old| {
+                old.pane != primary.pane && old.source != JoinSource::DisplayAgent
+            }) {
                 activity.state = ActivityState::Conflict;
                 activity.evidence.push("native worker pane conflicts with the explicit bead/pane join; existing association retained".into());
                 continue;
             }
             // Explicit Beads joins keep priority. Native coordinator links are
             // additional associations, not a competing exclusive claim.
-            if primary.source == JoinSource::NativeWorker
-                && joined
-                    .agents
-                    .get(&bead)
-                    .is_some_and(|old| old.source == JoinSource::DisplayAgent)
+            if matches!(
+                primary.source,
+                JoinSource::NativeWorker | JoinSource::NativeOwner
+            ) && joined
+                .agents
+                .get(&bead)
+                .is_some_and(|old| old.source == JoinSource::DisplayAgent)
             {
                 joined.agents.insert(bead, primary.clone());
                 activity.evidence.push(
@@ -195,7 +215,7 @@ mod tests {
                 id: "ark-1".into()
             }]
                 .source,
-            JoinSource::NativeWorker
+            JoinSource::NativeOwner
         );
         assert_eq!(
             joined.agents[&BeadKey {
@@ -346,7 +366,7 @@ mod tests {
             &config(),
         );
         assert_eq!(joined.agents[&key].pane.id, "w:p1");
-        assert_eq!(joined.agents[&key].source, JoinSource::NativeWorker);
+        assert_eq!(joined.agents[&key].source, JoinSource::NativeOwner);
         assert_eq!(
             activities[&("arkham".into(), "ark-1".into())].state,
             ActivityState::Unknown

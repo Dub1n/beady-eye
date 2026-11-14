@@ -293,27 +293,23 @@ impl Walk<'_> {
                 }
             }
             Cell::Agent => {
-                let label = row.activity_model.as_deref().or(agent);
+                let label = if self.layout.compact {
+                    row.activity_model
+                        .as_deref()
+                        .or(row.agent_identity.as_deref())
+                        .or(agent)
+                } else {
+                    row.activity_model.as_deref().or(agent)
+                };
                 if let Some(label) = label {
                     let label = if self.layout.ascii {
                         label.replace('◍', "@").to_string()
                     } else {
                         label.to_string()
                     };
-                    let label = if self.layout.compact && row.activity_model.is_some() {
-                        if let Some(state) = &row.live_agent_state {
-                            let marker = if self.layout.ascii { "@" } else { "◍" };
-                            let role = if state.starts_with("coord ") {
-                                "coord "
-                            } else if state.starts_with("worker ") {
-                                "worker "
-                            } else {
-                                ""
-                            };
-                            format!("{marker} {role}{label}")
-                        } else {
-                            label
-                        }
+                    let label = if self.layout.compact && row.live_agent_state.is_some() {
+                        let marker = if self.layout.ascii { "@" } else { "◍" };
+                        format!("{marker} {label}")
                     } else {
                         label
                     };
@@ -337,13 +333,9 @@ impl Walk<'_> {
                 if self.layout.compact {
                     if let Some(state) = &row.live_agent_state {
                         // A model must not hide the live pane/worker signal.
-                        if row.activity_model.is_some() || agent.is_none() {
+                        if label.is_some() || agent.is_none() {
                             let marker = if self.layout.ascii { "@" } else { "◍" };
-                            let state = state
-                                .strip_prefix("coord ")
-                                .or_else(|| state.strip_prefix("worker "))
-                                .unwrap_or(state);
-                            let text = if row.activity_model.is_some() {
+                            let text = if label.is_some() {
                                 format!("· {state}")
                             } else {
                                 format!(
@@ -357,7 +349,11 @@ impl Walk<'_> {
                 }
                 if self.layout.compact
                     && row.live_agent_state.is_none()
-                    && row.activity_state.as_deref() == Some("Activity unknown")
+                    && (row.activity_state.as_deref() == Some("Activity unknown")
+                        || (!row.status.is_finished()
+                            && row.activity.as_ref().is_some_and(|a| {
+                                a.execution_state() == crate::collect::omo::ExecutionState::Unknown
+                            })))
                 {
                     walked.cell(Span::styled(
                         if label.is_some() { "· ?" } else { "?" },
@@ -2118,6 +2114,99 @@ mod tests {
                 .find(|run| run.said.contains(".2"))
                 .expect("the id is drawn");
             assert_eq!(id.style.fg, status_style(&status).fg, "{painted:?}");
+        }
+    }
+    #[test]
+    fn execution_and_pane_presence_labels_follow_the_independent_state_matrix() {
+        use crate::collect::omo::{Activity, ActivityState, ExecutionState};
+        use crate::model::{
+            join::{AgentRef, JoinSource},
+            types::PaneStatus,
+        };
+        for idle in [false, true] {
+            for (stored, source, state, expected_model, expected_state) in [
+                (
+                    Status::Hooked,
+                    JoinSource::NativeWorker,
+                    ActivityState::Working,
+                    "Luna",
+                    if idle { "idle" } else { "active" },
+                ),
+                (
+                    Status::InProgress,
+                    JoinSource::NativeCoordinator,
+                    ActivityState::Finished,
+                    "Sol",
+                    if idle { "coord idle" } else { "coord live" },
+                ),
+                (
+                    Status::InProgress,
+                    JoinSource::NativeOwner,
+                    ActivityState::Unknown,
+                    "Sol",
+                    if idle {
+                        "owner idle · ?"
+                    } else {
+                        "owner live · ?"
+                    },
+                ),
+            ] {
+                let mut node = node("ark-1", "Gateway", stored.clone());
+                let model = if source == JoinSource::NativeWorker {
+                    "invented/gpt-6-luna"
+                } else {
+                    "invented/gpt-6.1-sol"
+                };
+                let activity:Activity=serde_json::from_value(serde_json::json!({"state":state,"project":"arkham","bead_id":"ark-1","attempt_id":"attempt-a","coordinator":"owner-a","effective_model":model,"coordinator_model":"invented/gpt-6.1-sol","fresh":if state==ActivityState::Working {Some(true)} else {None},"acceptance_ready":false,"evidence":[]})).unwrap();
+                node.activity = Some(activity);
+                node.agent = Some(AgentRef {
+                    pane: crate::model::types::testing::key("w:p1"),
+                    pane_status: if idle {
+                        PaneStatus::Idle
+                    } else {
+                        PaneStatus::Working
+                    },
+                    title: Some("Gateway owner".into()),
+                    source,
+                    agent_session: Some("owner-a".into()),
+                });
+                let content = row::cells(&node, None, None, None);
+                assert_eq!(content.activity_model.as_deref(), Some(expected_model));
+                assert_eq!(content.live_agent_state.as_deref(), Some(expected_state));
+                let text = Painted::of(
+                    bead_line(
+                        &content,
+                        "",
+                        &Widths::default(),
+                        &Layout {
+                            ascii: true,
+                            ..Layout::default()
+                        },
+                    ),
+                    100,
+                    1,
+                )
+                .rows()
+                .remove(0);
+                assert!(
+                    text.contains(&format!("{expected_model} · {expected_state}")),
+                    "{text}"
+                );
+                assert_eq!(
+                    node.execution_state(),
+                    match state {
+                        ActivityState::Working => ExecutionState::Active,
+                        ActivityState::Finished => ExecutionState::Inactive,
+                        _ => ExecutionState::Unknown,
+                    }
+                );
+                if stored == Status::Hooked {
+                    assert!(
+                        text.starts_with("[<]"),
+                        "stored hooked icon remains independent: {text}"
+                    );
+                }
+            }
         }
     }
 }

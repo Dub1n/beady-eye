@@ -303,6 +303,8 @@ pub struct Pane {
     pub agent: Option<String>,
     /// Application identity reported in the provider's runtime tokens.
     pub app: Option<String>,
+    /// Exact foreground native process reported by the provider, when available.
+    pub process_id: Option<u32>,
     pub agent_session: Option<AgentSession>,
     pub display_agent: Option<String>,
     pub title: Option<String>,
@@ -330,6 +332,7 @@ impl Pane {
             cwd,
             agent: None,
             app: None,
+            process_id: None,
             agent_session: None,
             display_agent: None,
             title: None,

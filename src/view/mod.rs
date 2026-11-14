@@ -584,7 +584,8 @@ mod tests {
             JoinSource::AgentSession => Some(JoinSource::AgentPane),
             JoinSource::AgentPane => Some(JoinSource::DisplayAgent),
             JoinSource::DisplayAgent => Some(JoinSource::NativeWorker),
-            JoinSource::NativeWorker => Some(JoinSource::NativeCoordinator),
+            JoinSource::NativeWorker => Some(JoinSource::NativeOwner),
+            JoinSource::NativeOwner => Some(JoinSource::NativeCoordinator),
             JoinSource::NativeCoordinator => None,
         })
     }
