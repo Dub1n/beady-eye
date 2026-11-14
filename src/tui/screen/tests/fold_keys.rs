@@ -86,7 +86,7 @@ const COLLAPSE_THE_SUBTREE: KeyCode = KeyCode::Char('c');
 const RESTORE_THE_SUBTREE: KeyCode = KeyCode::Char('d');
 const OPEN_OR_STEP_IN: KeyCode = KeyCode::Char('l');
 const SHUT_OR_STEP_OUT: KeyCode = KeyCode::Char('h');
-const TOGGLE: KeyCode = KeyCode::Char(' ');
+const TOGGLE: KeyCode = KeyCode::Char('o');
 const DOWN: KeyCode = KeyCode::Char('j');
 const UP: KeyCode = KeyCode::Char('k');
 const FIRST_ROW: KeyCode = KeyCode::Char('g');
@@ -230,34 +230,37 @@ fn e_c_and_d_fold_the_subtree_under_the_selection() {
     assert_eq!(forest(&mut shown, &TALL), AT_REST);
 }
 
-/// Right focuses the selected copy, Left reveals that copy's parent scope,
-/// and Space changes its fold independently of scope navigation.
+/// Arrows fold and traverse; Ctrl+Space roots independently; Space opens details.
 #[test]
-fn right_left_and_space_control_scope_selection_and_folding() {
+fn arrows_root_shortcut_and_space_have_separate_roles() {
     let mut shown = over_every_fold_kind();
     clicked_on(&mut shown, &TALL, THE_COPY_UNDER_IT);
     assert_eq!(selected(&shown), "ark-1.1");
     press(&mut shown, OPEN_OR_STEP_IN);
     assert_eq!(selected(&shown), "ark-1.1");
+    assert!(!shown.forest.is_focused());
+    press(&mut shown, OPEN_OR_STEP_IN);
+    assert_eq!(selected(&shown), "ark-1.1.1");
+    press(&mut shown, SHUT_OR_STEP_OUT);
+    assert_eq!(selected(&shown), "ark-1.1");
+    press(&mut shown, TOGGLE);
+    assert_eq!(
+        shown.forest.lines()[shown.forest.selected_line()].folded,
+        Some(false)
+    );
+    press(&mut shown, TOGGLE);
+    assert_eq!(
+        shown.forest.lines()[shown.forest.selected_line()].folded,
+        Some(true)
+    );
+    assert!(shown.apply(Action::FocusForest));
     assert_eq!(
         shown.forest.focused_on(),
         [bead("arkham", "ark-1.1")].into()
     );
-    press(&mut shown, OPEN_OR_STEP_IN);
-    assert_eq!(selected(&shown), "ark-1.1");
-    press(&mut shown, SHUT_OR_STEP_OUT);
-    assert_eq!(selected(&shown), "ark-1.1");
-    assert_eq!(
-        shown.forest.focused_on(),
-        [bead("arkham", "ark-1.2")].into()
-    );
-    let fold = |shown: &Shown| shown.forest.lines()[shown.forest.selected_line()].folded;
-    let before = fold(&shown).expect("this branch can fold");
-    press(&mut shown, TOGGLE);
-    assert_eq!(fold(&shown), Some(!before));
-    assert_eq!(selected(&shown), "ark-1.1");
-    press(&mut shown, TOGGLE);
-    assert_eq!(fold(&shown), Some(before));
+    assert!(press(&mut shown, KeyCode::Char(' ')));
+    let details = bead_page(&mut shown, 80, 24);
+    assert!(details[0].contains("ark-1.1"), "{details:?}");
 }
 
 /// The motions walk the opened forest row by row, and the view follows the

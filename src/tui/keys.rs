@@ -75,6 +75,12 @@ pub(super) const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: &[alone(KeyCode::Char(' '), "Space")],
+        action: Action::ShowBead,
+        does: "show the selected bead, as Enter",
+        hint: None,
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('o'), "o")],
         action: Action::ToggleFold,
         does: "fold or unfold the selected node",
         hint: None,
@@ -102,6 +108,12 @@ pub(super) const BINDINGS: &[Binding] = &[
         action: Action::ShowBindings,
         does: "show these key bindings",
         hint: Some("keys"),
+    },
+    Binding {
+        keys: &[alone(KeyCode::Char('b'), "b")],
+        action: Action::ToggleDependencies,
+        does: "switch ownership tree and dependency graph",
+        hint: None,
     },
     Binding {
         keys: &[alone(KeyCode::Char('r'), "r")],
@@ -137,6 +149,12 @@ pub(super) const BINDINGS: &[Binding] = &[
         keys: &[alone(KeyCode::Char('F'), "F")],
         action: Action::FocusForest,
         does: "draw the selected bead as the only root, or put the forest back",
+        hint: None,
+    },
+    Binding {
+        keys: &[ctrl(' ', "^Space")],
+        action: Action::RootSelected,
+        does: "set the selected bead as the displayed root",
         hint: None,
     },
     Binding {
@@ -250,13 +268,13 @@ pub(super) const BINDINGS: &[Binding] = &[
             alone(KeyCode::Char('l'), "l"),
         ],
         action: Action::ExpandOrChild,
-        does: "focus the selected subtree",
+        does: "expand, then select the first child",
         hint: None,
     },
     Binding {
         keys: &[alone(KeyCode::Left, "Left"), alone(KeyCode::Char('h'), "h")],
         action: Action::CollapseOrParent,
-        does: "select parent; at displayed root, reveal parent level",
+        does: "collapse, then select the parent",
         hint: None,
     },
     Binding {
@@ -293,6 +311,12 @@ pub(super) const BINDINGS: &[Binding] = &[
 
 /// The action a key asks for, or nothing where it is bound to none.
 pub(super) fn action(key: KeyEvent) -> Option<Action> {
+    // Legacy terminals encode Ctrl+Space as NUL / Ctrl+@.
+    if key.code == KeyCode::Null
+        || (key.code == KeyCode::Char('@') && key.modifiers.contains(KeyModifiers::CONTROL))
+    {
+        return Some(Action::RootSelected);
+    }
     BINDINGS
         .iter()
         .find(|binding| answers(binding.keys, key))
@@ -583,6 +607,8 @@ pub(super) mod tests {
             Action::ToggleFilter,
             Action::ToggleCompleted,
             Action::ToggleFixtures,
+            Action::ToggleDependencies,
+            Action::RootSelected,
             Action::ToggleReadyList,
             Action::NextView,
             Action::NextScope,
@@ -626,6 +652,8 @@ pub(super) mod tests {
                 | Action::ToggleFilter
                 | Action::ToggleCompleted
                 | Action::ToggleFixtures
+                | Action::ToggleDependencies
+                | Action::RootSelected
                 | Action::ToggleReadyList
                 | Action::NextView
                 | Action::NextScope
@@ -840,6 +868,12 @@ pub(super) mod tests {
             ]);
 
         for pressed in swept {
+            // Ctrl+@ is the legacy terminal encoding of the named Ctrl+Space.
+            if pressed.code == KeyCode::Char('@')
+                && pressed.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                continue;
+            }
             let control = pressed.modifiers.contains(KeyModifiers::CONTROL);
             let expected = named
                 .iter()
@@ -870,7 +904,12 @@ pub(super) mod tests {
             (control('u'), Action::Move(Motion::HalfScreenUp)),
             (key(KeyCode::PageDown), Action::Move(Motion::HalfScreenDown)),
             (key(KeyCode::PageUp), Action::Move(Motion::HalfScreenUp)),
-            (key(KeyCode::Char(' ')), Action::ToggleFold),
+            (key(KeyCode::Char(' ')), Action::ShowBead),
+            (key(KeyCode::Char('o')), Action::ToggleFold),
+            (control(' '), Action::RootSelected),
+            (key(KeyCode::Null), Action::RootSelected),
+            (control('@'), Action::RootSelected),
+            (key(KeyCode::Char('b')), Action::ToggleDependencies),
             (key(KeyCode::Enter), Action::ShowBead),
             (key(KeyCode::Char('f')), Action::Focus),
             (key(KeyCode::Esc), Action::Back),

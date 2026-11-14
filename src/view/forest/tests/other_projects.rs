@@ -521,6 +521,7 @@ fn another_projects_bead_keeps_its_whole_id_under_a_bead_its_id_runs_on_from() {
 #[test]
 fn compact_foreign_rows_name_their_owning_project() {
     let mut forest = flatten_compact(harbour_waiting_on_dunwich());
+    forest.apply(Action::ToggleDependencies);
     forest.apply(Action::ExpandForest);
     let foreign = forest.lines().iter().find_map(|line| match &line.content {
         Content::Bead(row) if row.title.starts_with("[dunwich] ") => Some(&row.title),

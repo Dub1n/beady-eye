@@ -102,3 +102,36 @@ formatting, diff checks, the extracted source scans and the release build.
 The rebuilt `bin/bdi` reports 0.41.1 and matches the canonical release binary.
 The new UI behaviour was exercised through the real PTY/application tests;
 this follow-up does not claim a fresh live Herdr-pane check.
+
+## 0.42.0 ownership and keyboard follow-up
+
+The default tree projects each project-qualified bead once beneath its actual
+parent. Shared blockers remain in the complete acquired graph and in details;
+`b` switches to that graph explicitly. The existing ready/unblocking list and
+configured views still use the complete dependency source. Ownership counts
+measure the ownership subtree rather than unrelated work reached through blockers.
+Missing parents leave work as roots; ownership cycles are cut deterministically
+for display and retain cycle qualification. Project identity is part of every key.
+No tracker records, dependencies or execution evidence are changed.
+
+Right expands a collapsed branch, then enters its first child; Left collapses
+an expanded branch, then selects its parent. Space and Enter both open details.
+Ctrl+Space (including terminal NUL / Ctrl+@) sets the selected root idempotently,
+including within an already focused subtree. F retains the existing focus/restore
+action. Root identity is preserved while switching tree and graph presentations.
+The ready/configured list can enter the selected tree through that same action.
+Home restores the default ownership scope. Existing `d` subtree restoration is
+preserved; `o` remains an explicit fold toggle.
+
+Invented collection tests cover shared blockers across roots, project-qualified
+ID collisions, missing parents, cycles, unread roots, graph preservation, scope
+switching and rooting from the ready list. A real PTY test exercises one-copy
+ownership rows versus repeated graph references, Space details and Ctrl+Space
+rooting through the application's event loop. The prior narrow-pane tests remain.
+
+Follow-up validation: 2,765 Cargo tests passed with zero failures and three ignored
+across 44 reported targets. Both Clippy modes passed with warnings denied, as did
+formatting, diff checks, extracted source scans, package verification and release
+build. Installed `bin/bdi` reports 0.42.0 and matches the canonical release binary.
+This follow-up uses invented collection and real PTY evidence; it does not claim
+fresh live Herdr-pane, macOS or full Nix validation.

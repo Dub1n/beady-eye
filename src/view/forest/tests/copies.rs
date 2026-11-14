@@ -50,8 +50,8 @@ fn assert_held_exactly(forest: &Forest, trees: &[Arc<Tree>]) {
         assert!(Arc::ptr_eq(held, was), "{} was copied", was.root);
         assert_eq!(
             Arc::strong_count(was),
-            4,
-            "{} is held by collected, trees, the lines drawn from it and this test, and nothing else",
+            6,
+            "{} is held by collected, trees, their retained dependency source, the lines and this test",
             was.root
         );
     }

@@ -68,9 +68,9 @@ pub enum Action {
     Move(Motion),
     /// Restore the default current-work forest and leave focused scopes.
     Home,
-    /// Move to the parent, or reveal the containing level at the focused root.
+    /// Collapse an expanded branch, otherwise select its parent.
     CollapseOrParent,
-    /// Focus the selected bead as the sole displayed root, retaining selection.
+    /// Expand a collapsed branch, otherwise select its first child.
     ExpandOrChild,
     ToggleFold,
     /// Expand the selected node and everything under it, at every depth.
@@ -99,6 +99,10 @@ pub enum Action {
     ToggleCompleted,
     /// Show or hide records tagged as disposable fixtures.
     ToggleFixtures,
+    /// Toggle ownership hierarchy and the complete dependency graph.
+    ToggleDependencies,
+    /// Make the selected bead the root, including inside an existing scope.
+    RootSelected,
     /// Draw the ready list in place of the forest, or put the forest back.
     /// In a view, list only its ready beads, or all of them again.
     ToggleReadyList,

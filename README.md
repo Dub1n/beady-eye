@@ -89,10 +89,12 @@ Keys to start with. `?` lists the lot.
 | key | does |
 |---|---|
 | `↑` `↓` `j` `k` | move |
-| `←` `h` / `→` `l` | select/reveal the parent / focus the selected subtree |
-| Space | collapse or expand |
+| `←` `h` / `→` `l` | collapse/select parent / expand/select child |
+| Space / Enter | show bead details |
+| Ctrl+Space | set the selected root |
+| F | focus / restore the forest |
+| b | switch ownership tree / dependency graph |
 | Home | restore Current work |
-| `Enter` | open the bead, and from there, focus its pane |
 | `f` | focus the selected bead's pane |
 | `z` | toggle completed beads within scope |
 | `a` | legacy all/live-agent root filter |

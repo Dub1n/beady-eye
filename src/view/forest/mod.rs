@@ -68,6 +68,8 @@ pub struct Origin {
 /// that decide which of them are visible and which one is current.
 pub struct Forest {
     snapshot: Snapshot,
+    source: Snapshot,
+    ownership: bool,
     /// What layout reads of the snapshot, answered when it was taken.
     facts: Arc<Facts>,
     folds: Folds,
@@ -137,11 +139,15 @@ pub struct Forest {
 
 /// Flatten a snapshot into its lines.
 pub fn flatten(snapshot: Snapshot) -> Forest {
+    let source = snapshot.clone();
+    let snapshot = snapshot.hierarchy();
     let spine = Spine::default();
     let spines = BTreeMap::new();
     let mut forest = Forest {
         facts: Arc::new(Facts::of(&snapshot, spine, &spines, None)),
         snapshot,
+        source,
+        ownership: true,
         folds: Folds::default(),
         spine,
         spines,
@@ -219,6 +225,11 @@ impl Forest {
             Filter::LiveAgents => "Live",
             Filter::Activity => "Activity",
             Filter::History | Filter::All => "History",
+        };
+        let scope = if self.ownership {
+            format!("Tree {scope}")
+        } else {
+            scope.to_string()
         };
         format!(
             "{scope} z{} x{}",
@@ -355,6 +366,10 @@ impl Forest {
         // is nobody's answer to `a`. So the one in hand goes on the new
         // snapshot, exactly as the folds and the cursor do.
         snapshot.refilter(self.snapshot.filter);
+        self.source = snapshot.clone();
+        if self.ownership {
+            snapshot = snapshot.hierarchy();
+        }
         self.retain_inspected_root(&mut snapshot);
         self.take(snapshot);
         let focused = std::mem::take(&mut self.focused);
@@ -688,6 +703,7 @@ impl Forest {
                 self.show_fixtures = false;
                 self.pinned_root = None;
                 self.preserve_completed = None;
+                self.layout.dependencies = false;
                 self.snapshot.refilter(Filter::CurrentWork);
                 self.answer();
                 true
@@ -749,6 +765,17 @@ impl Forest {
                 self.show_completed = !self.show_completed;
                 true
             }
+            Action::ToggleDependencies => {
+                let selected = self.place().map(|place| place.key().clone());
+                self.layout.dependencies = !self.layout.dependencies;
+                self.list = None;
+                self.lay_out();
+                if let Some(key) = selected {
+                    self.go_to(&key);
+                }
+                self.reveal();
+                return true;
+            }
             Action::ToggleFixtures => {
                 self.show_fixtures = !self.show_fixtures;
                 true
@@ -779,6 +806,10 @@ impl Forest {
                 self.switch_to(next);
                 self.reveal();
                 return true;
+            }
+            Action::RootSelected => {
+                self.root_selected();
+                true
             }
             Action::FocusForest => {
                 self.focus_forest();
@@ -822,7 +853,31 @@ impl Forest {
     ///
     /// Either way the beads the command line named and no collection has
     /// drawn yet are let go of: the reader has taken the mode in hand.
+    fn root_selected(&mut self) {
+        let Some(key) = self.place().map(|place| place.key().clone()) else {
+            return;
+        };
+        self.list = None;
+        self.lay_out();
+        let Some(place) = self.place_of(&key) else {
+            return;
+        };
+        self.named.clear();
+        self.named_at_launch = false;
+        self.focused = vec![place.clone()];
+        self.answer();
+        self.cursor = Some(Handle::Bead(place));
+    }
+
     fn focus_forest(&mut self) {
+        if self.list.is_some() {
+            let Some(key) = self.place().map(|place| place.key().clone()) else {
+                return;
+            };
+            self.list = None;
+            self.lay_out();
+            self.go_to(&key);
+        }
         self.named.clear();
         self.named_at_launch = false;
         if !self.focused.is_empty() {
@@ -1316,94 +1371,29 @@ impl Forest {
 
     /// `h`: shut an open node, and step out of one already shut. Reports
     /// whether it shut one.
-    fn parent_place(&self, place: &Place) -> Option<Place> {
-        let mut parent = place.clone();
-        parent.steps.pop()?;
-        Some(parent)
-    }
-
     fn collapse_or_parent(&mut self) -> bool {
-        if (self.list.is_some() || !matches!(self.handle_at(self.selected), Some(Handle::Bead(_))))
-            && self.fold_at(self.selected) == Some(true)
-        {
+        if self.fold_at(self.selected) == Some(true) {
             if let Some(handle) = self.handle_at(self.selected) {
                 self.point(handle, false);
                 return true;
             }
         }
-        let selected = self.handle_at(self.selected);
-        if let Some(Handle::Bead(place)) = &selected {
-            if place.steps.is_empty()
-                && !self.focused.iter().any(|focused| focused == place)
-                && self
-                    .parent_of(self.selected)
-                    .is_some_and(|parent| matches!(self.lines[parent].content, Content::Project(_)))
-            {
-                return false;
-            }
-        }
-        // A focused tree root is drawn below its project header. That display
-        // parent is not the next scope: reveal the logical parent first.
-        if let Some(Handle::Bead(place)) = &selected {
-            if let Some(root) = self.focused.iter().find(|root| *root == place).cloned() {
-                if let Some(parent) = self.parent_place(&root) {
-                    self.focused = vec![parent];
-                } else {
-                    self.focused.clear();
-                }
-                self.answer();
-                self.cursor = Some(Handle::Bead(place.clone()));
-                return true;
-            }
-        }
         if let Some(parent) = self.parent_of(self.selected) {
             self.step_to(Some(parent));
-            return false;
-        }
-        let Some(Handle::Bead(place)) = selected else {
-            return false;
-        };
-        if let Some(root) = self
-            .focused
-            .iter()
-            .find(|root| at_or_beneath(&place, root))
-            .cloned()
-        {
-            if let Some(parent) = self.parent_place(&root) {
-                self.focused = vec![parent];
-            } else {
-                self.focused.clear();
-            }
-            self.answer();
-            self.cursor = Some(Handle::Bead(place));
-            return true;
         }
         false
     }
 
-    /// Right focuses a selected bead. Summary rows and list rows keep their
-    /// own navigation: open a folded summary before stepping into its first row.
+    /// Expand a collapsed branch, then step into its first child.
     fn expand_or_child(&mut self) -> bool {
-        if let Some(Handle::Bead(place)) = self.handle_at(self.selected) {
-            if self.list.is_none() {
-                self.named.clear();
-                self.named_at_launch = false;
-                self.focused = vec![place.clone()];
-                self.answer();
-                self.cursor = Some(Handle::Bead(place));
+        if self.fold_at(self.selected) == Some(false) {
+            if let Some(handle) = self.handle_at(self.selected) {
+                self.point(handle, true);
                 return true;
             }
         }
-        match (self.fold_at(self.selected), self.handle_at(self.selected)) {
-            (Some(false), Some(handle)) => {
-                self.point(handle, true);
-                true
-            }
-            _ => {
-                self.step_to(self.first_child_of(self.selected));
-                false
-            }
-        }
+        self.step_to(self.first_child_of(self.selected));
+        false
     }
 
     fn move_to(&mut self, motion: Motion) {
@@ -1941,7 +1931,47 @@ impl Forest {
     /// They are moved out rather than copied. This runs on every keystroke,
     /// and a caller asking whether the screen moved can compare the two sets
     /// without duplicating either.
+    /// Keep dependency acquisition separate from the ownership presentation.
+    fn sync_projection(&mut self) {
+        let ownership = !self.layout.dependencies && self.list.is_none();
+        if self.ownership == ownership {
+            return;
+        }
+        let selected = self.cursor.as_ref().and_then(|handle| match handle {
+            Handle::Bead(place) => Some(place.key().clone()),
+            _ => None,
+        });
+        let focused: Vec<_> = self
+            .focused
+            .iter()
+            .map(|place| place.key().clone())
+            .collect();
+        let mut snapshot = self.source.clone();
+        if snapshot.filter != self.snapshot.filter {
+            snapshot.refilter(self.snapshot.filter);
+        }
+        if ownership {
+            snapshot = snapshot.hierarchy();
+        }
+        self.ownership = ownership;
+        self.focused.clear();
+        self.spines.clear();
+        self.take(snapshot);
+        self.focused = focused
+            .iter()
+            .filter_map(|key| self.place_of(key))
+            .collect();
+        if !self.focused.is_empty() {
+            self.answer();
+        }
+
+        self.cursor = selected
+            .and_then(|key| self.place_of(&key))
+            .map(Handle::Bead);
+    }
+
     fn lay_out(&mut self) -> Drawn {
+        self.sync_projection();
         if let Some(List::View { name, ready }) = &self.list {
             if !self.snapshot.views.contains(name) {
                 self.list = ready.then_some(List::Ready);
