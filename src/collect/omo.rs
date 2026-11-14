@@ -5,7 +5,8 @@
 //! task directory. Each requested task is opened by its validated task ID.
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -13,8 +14,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+pub mod history;
 mod runtime;
 mod sessions;
+mod stream;
 pub use runtime::resolve_runtime_session;
 
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
@@ -269,12 +272,120 @@ pub struct Reader {
     config: OmoConfig,
     records: BTreeMap<String, CachedRecord>,
     sessions: sessions::Sessions,
+    streams: stream::Streams,
+    stream_eligible: BTreeMap<(String, String, String), bool>,
+}
+
+/// Only collector metadata survives parsing. Unknown values (including nested
+/// conversation data) are consumed with IgnoredAny, never materialized as Value.
+#[derive(Debug, Clone, PartialEq)]
+struct NativeRecord(Value);
+
+#[derive(Clone, Copy)]
+enum NativeFields {
+    Task,
+    Model,
+    String,
+    Version,
+}
+
+impl<'de> DeserializeSeed<'de> for NativeFields {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for NativeFields {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("native task metadata")
+    }
+
+    fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Value, M::Error> {
+        let mut fields = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            let kind = match (self, key.as_str()) {
+                (Self::Task, "version") => Some(Self::Version),
+                (Self::Task, "effective_model" | "resolved_model") => Some(Self::Model),
+                (
+                    Self::Task,
+                    "task_id" | "project" | "bead_id" | "attempt_id" | "coordinator"
+                    | "parent_session_id" | "child_session_id" | "model" | "effectiveModel"
+                    | "agent_type" | "workerType" | "name" | "workerName" | "status" | "updated_at",
+                )
+                | (Self::Model, "display" | "provider" | "model_id") => Some(Self::String),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                // Match serde_json::Value's last-value-wins duplicate semantics,
+                // including a final value of the wrong type replacing a string.
+                fields.insert(key, map.next_value_seed(kind)?);
+            } else {
+                map.next_value::<IgnoredAny>()?;
+            }
+        }
+        Ok(if matches!(self, Self::Task | Self::Model) {
+            Value::Object(fields)
+        } else {
+            Value::Null
+        })
+    }
+
+    fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Value, S::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Value::Null)
+    }
+
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Value, E> {
+        Ok(if matches!(self, Self::String | Self::Model) {
+            Value::String(value.to_owned())
+        } else {
+            Value::Null
+        })
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Value, E> {
+        Ok(if matches!(self, Self::Version) {
+            Value::from(value)
+        } else {
+            Value::Null
+        })
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Value, E> {
+        Ok(if matches!(self, Self::Version) && value >= 0 {
+            Value::from(value)
+        } else {
+            Value::Null
+        })
+    }
+
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+}
+
+impl<'de> Deserialize<'de> for NativeRecord {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        NativeFields::Task.deserialize(deserializer).map(Self)
+    }
 }
 
 #[derive(Clone)]
 enum CachedRecord {
-    Parsed(Value, SystemTime, u64),
-    Stale(Value, SystemTime, u64, String),
+    Parsed(NativeRecord, SystemTime, u64),
+    Stale(NativeRecord, SystemTime, u64, String),
     Missing,
     Invalid(String),
 }
@@ -285,12 +396,15 @@ impl Reader {
             config,
             records: BTreeMap::new(),
             sessions: sessions::Sessions::default(),
+            streams: stream::Streams::default(),
+            stream_eligible: Default::default(),
         }
     }
 
     /// Collect all supplied beads; at most 256 distinct task files are read.
     pub fn collect(&mut self, inputs: &[BeadInput]) -> ActivityBatch {
-        self.sessions.begin();
+        self.sessions.begin_collection();
+        self.stream_eligible.clear();
         let mut batch = ActivityBatch::default();
         let dispatch_path = self.config.dispatch_path.as_str();
         let referenced = inputs
@@ -319,6 +433,31 @@ impl Reader {
             batch
                 .activities
                 .insert((input.project.clone(), input.bead_id.clone()), activity);
+        }
+        if self.config.runtime_directory.is_some() {
+            let coordinators = batch
+                .activities
+                .values()
+                .filter_map(|a| a.coordinator.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            self.streams.refresh(&self.config, &coordinators);
+            for activity in batch.activities.values_mut() {
+                if activity.workers.is_empty() {
+                    let eligible = stream_key(activity)
+                        .and_then(|key| self.stream_eligible.get(&key).copied());
+                    self.streams.apply(activity, eligible);
+                } else {
+                    let mut workers = std::mem::take(&mut activity.workers);
+                    for worker in &mut workers {
+                        let eligible = stream_key(worker)
+                            .and_then(|key| self.stream_eligible.get(&key).copied());
+                        self.streams.apply(worker, eligible);
+                    }
+                    *activity = aggregate(activity.clone(), workers);
+                }
+            }
         }
         let mut owners =
             BTreeMap::<(String, String), std::collections::BTreeSet<(String, String)>>::new();
@@ -359,9 +498,9 @@ impl Reader {
             .as_ref()
             .zip(activity.coordinator.as_ref())
         {
-            match self.sessions.model(directory, session) {
-                Ok(model) => {
-                    activity.coordinator_model = Some(model);
+            match self.sessions.verify(directory, session) {
+                Ok(()) => {
+                    activity.coordinator_model = self.sessions.model(directory, session);
                     activity.evidence.push(format!("coordinator ownership from current attempt and verified session {session}; ownership may be shared across beads"));
                 }
                 Err(reason) => activity
@@ -408,19 +547,16 @@ impl Reader {
             return;
         };
         let identity = match session {
-            Some(session) => self
-                .sessions
-                .model(&directory, &session)
-                .map(|model| (session, model)),
+            Some(session) => self.sessions.verify(&directory, &session).map(|()| session),
             None => self.sessions.discover(&directory),
         };
         match identity {
-            Ok((session, model)) => {
-                activity.effective_model = Some(model);
+            Ok(session) => {
                 if role == "worker" {
                     activity.child_session = Some(session.clone());
                 }
-                activity.evidence.push(format!("{role} model from verified session {session}; identity only, not bead liveness or acceptance"));
+                activity.effective_model = self.sessions.model(&directory, &session);
+                activity.evidence.push(format!("{role} identity from verified session header {session}; model from structured model_change metadata when available; identity only, not bead liveness or acceptance"));
             }
             Err(reason) => activity
                 .evidence
@@ -574,6 +710,7 @@ impl Reader {
                 return result;
             }
         };
+        let value = value.0;
         let last_known = source_stale.is_some();
         let updated_at = text(&value, "updated_at")
             .and_then(|v| DateTime::parse_from_rfc3339(&v).ok())
@@ -667,8 +804,11 @@ impl Reader {
             .or_else(|| text(&value, "workerName"))
             .or(result.worker_name)
             .map(bounded);
-        result.child_session = record_session.or(result.child_session).map(bounded);
-        result.coordinator = record_coordinator.or(result.coordinator).map(bounded);
+        result.child_session = record_session.clone().or(result.child_session).map(bounded);
+        result.coordinator = record_coordinator
+            .clone()
+            .or(result.coordinator)
+            .map(bounded);
         let Some(native_status) = text(&value, "status") else {
             result
                 .evidence
@@ -758,6 +898,23 @@ impl Reader {
                 .evidence
                 .push("closed Bead has a working current task".into());
         }
+        if !last_known
+            && record_session.as_deref() == field(dispatch, "childSession").and_then(string_value)
+            && record_session.as_deref().is_some_and(safe_id)
+            && record_coordinator.as_deref() == result.coordinator.as_deref()
+            && record_coordinator.as_deref().is_some_and(safe_id)
+        {
+            if let (Some(attempt), Some(child)) = (&result.attempt_id, &record_session) {
+                self.stream_eligible.insert(
+                    (attempt.clone(), task_id.clone(), child.clone()),
+                    matches!(native_status.as_str(), "running" | "working")
+                        && !input
+                            .bead_status
+                            .as_deref()
+                            .is_some_and(|s| s.eq_ignore_ascii_case("closed")),
+                );
+            }
+        }
         result
     }
 
@@ -793,7 +950,7 @@ impl Reader {
             _ => None,
         });
         let record = match read_bounded(&path, self.config.max_record_bytes.min(MAX_RECORD_BYTES)) {
-            Ok(Some((bytes, modified))) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(Some((bytes, modified))) => match serde_json::from_slice::<NativeRecord>(&bytes) {
                 Ok(value) => CachedRecord::Parsed(value, modified, bytes.len() as u64),
                 Err(_) => previous.map_or_else(
                     || CachedRecord::Invalid("partial or invalid task JSON".into()),
@@ -1088,6 +1245,14 @@ fn safe_id(value: &str) -> bool {
         && value != ".."
 }
 
+fn stream_key(activity: &Activity) -> Option<(String, String, String)> {
+    Some((
+        activity.attempt_id.clone()?,
+        activity.task_id.clone()?,
+        activity.child_session.clone()?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1126,6 +1291,130 @@ mod tests {
             freshness_seconds: 3600,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn native_record_skips_conversation_fields_in_fresh_and_last_known_cache() {
+        let mut task = record("completed");
+        let secret = "invented sensitive conversation";
+        task["final_response"] = secret.into();
+        task["spawn_spec"] = serde_json::json!({"prompt":secret,"messages":[{"text":secret}]});
+        task["unknown"] = serde_json::json!([secret, {"nested":secret}]);
+        for key in ["effective_model", "resolved_model"] {
+            task[key]["final_response"] = secret.into();
+            task[key]["spawn_spec"] = serde_json::json!({"prompt":secret});
+            // Wrongly typed identity fields must not retain arbitrary objects.
+            task[key]["provider"] = serde_json::json!({"text":secret});
+        }
+        let expected = NativeRecord(serde_json::json!({
+            "task_id":"task-1", "parent_session_id":"coord-1",
+            "child_session_id":"session-1", "name":"worker", "agent_type":"agent",
+            "model":"chatgpt-subscription/gpt-6-luna", "status":"completed",
+            "updated_at":task["updated_at"],
+            "effective_model": {"provider":null, "model_id":"gpt-6-luna",
+                "display":"chatgpt-subscription/gpt-6-luna"},
+            "resolved_model": {"provider":null, "model_id":"gpt-6-luna",
+                "display":"chatgpt-subscription/gpt-6-luna"}
+        }));
+        let mut reader = reader_with(task);
+        let batch = reader.collect(&[input()]);
+        let activity = batch.activities.values().next().unwrap();
+        assert_eq!(activity.state, ActivityState::Finished);
+        assert_eq!(activity.model_label(), Some("Luna"));
+        assert!(!serde_json::to_string(activity).unwrap().contains(secret));
+        match reader.records.get("task-1").unwrap() {
+            CachedRecord::Parsed(value, _, _) => assert_eq!(value, &expected),
+            _ => panic!("expected parsed cache"),
+        }
+        let path = reader.config.task_directory.join("task-1.json");
+        // Invalid trailing input must not replace the sanitized last-known cache.
+        fs::write(
+            &path,
+            format!(r#"{{"final_response":"{secret}"}} trailing"#),
+        )
+        .unwrap();
+        reader.collect(&[input()]);
+        match reader.records.get("task-1").unwrap() {
+            CachedRecord::Stale(value, _, _, _) => assert_eq!(value, &expected),
+            _ => panic!("expected last-known cache after partial write"),
+        }
+        fs::remove_file(&path).unwrap();
+        reader.collect(&[input()]);
+        match reader.records.get("task-1").unwrap() {
+            CachedRecord::Stale(value, _, _, _) => assert_eq!(value, &expected),
+            _ => panic!("expected last-known cache after removal"),
+        }
+        fs::remove_dir_all(reader.config.task_directory).unwrap();
+    }
+
+    #[test]
+    fn native_record_duplicates_and_supported_field_types_keep_value_semantics() {
+        let parsed: NativeRecord = serde_json::from_str(
+            r#"{
+            "task_id":"old", "task_id":"task-1",
+            "status":"running", "status":{"final_response":"invented secret"},
+            "name":"old", "name":null,
+            "version":2, "version":"unknown",
+            "effective_model":{"display":"old","display":["invented secret"],
+                "provider":"demo","model_id":"demo-model","prompt":"invented secret"},
+            "resolved_model":"fallback/model",
+            "final_response":"invented secret", "final_response":{"messages":[]}
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed,
+            NativeRecord(serde_json::json!({
+                "task_id":"task-1", "status":null, "name":null, "version":null,
+                "effective_model":{"display":null,"provider":"demo","model_id":"demo-model"},
+                "resolved_model":"fallback/model"
+            }))
+        );
+        assert_eq!(
+            model_string(&parsed.0["effective_model"]).as_deref(),
+            Some("demo/demo-model")
+        );
+        for version in ["1", "2", "0", "-1", "1.0", "null", "true", "[]", "{}"] {
+            let json = format!(r#"{{"version":{version}}}"#);
+            let original: Value = serde_json::from_str(&json).unwrap();
+            let parsed: NativeRecord = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.0["version"].as_u64(), original["version"].as_u64());
+        }
+        for json in ["[]", "null", "false", "42", r#""unsupported""#] {
+            let parsed: NativeRecord = serde_json::from_str(json).unwrap();
+            assert!(!parsed.0.is_object());
+        }
+        assert!(serde_json::from_str::<NativeRecord>(r#"{"final_response":["partial"#).is_err());
+    }
+
+    #[test]
+    fn stream_eligibility_requires_current_receipt_task_child_and_parent_even_when_file_time_is_old(
+    ) {
+        let mut value = record("running");
+        value["updated_at"] = "2001-01-01T00:00:00Z".into();
+        let mut reader = reader_with(value.clone());
+        reader.collect(&[input()]);
+        assert_eq!(
+            reader.stream_eligible.values().copied().collect::<Vec<_>>(),
+            vec![true]
+        );
+        for key in ["child_session_id", "parent_session_id"] {
+            let mut bad = value.clone();
+            bad.as_object_mut().unwrap().remove(key);
+            let mut reader = reader_with(bad);
+            reader.collect(&[input()]);
+            assert!(reader.stream_eligible.is_empty());
+        }
+        let mut old = input();
+        old.fields["metadata"]["qrclipDispatch"]["attemptId"] = "old-attempt".into();
+        reader.collect(&[old]);
+        assert!(reader.stream_eligible.is_empty());
+        fs::remove_file(reader.config.task_directory.join("task-1.json")).unwrap();
+        reader.collect(&[input()]);
+        assert!(
+            reader.stream_eligible.is_empty(),
+            "cached unreadable records cannot supply identity for promotion"
+        );
     }
     fn multi_reader(statuses: &[&str]) -> (Reader, BeadInput) {
         let dir = temp_dir("multi");
@@ -1178,6 +1467,10 @@ mod tests {
             .next()
             .unwrap();
         assert_eq!(activity.model_label(), Some("Sol"));
+        assert_eq!(
+            activity.coordinator_model.as_deref(),
+            Some("invented/gpt-6.1-sol")
+        );
         assert_eq!(activity.state, ActivityState::Unknown);
         assert_eq!(activity.fresh, None);
         assert!(!activity.acceptance_ready);
@@ -1205,7 +1498,10 @@ mod tests {
             activity.effective_model, None,
             "coordinator is not the delegated worker"
         );
-        assert_eq!(activity.owner_label().as_deref(), Some("Sol (coord)"));
+        assert_eq!(
+            activity.coordinator_model.as_deref(),
+            Some("invented/gpt-6.1-sol")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1242,6 +1538,60 @@ mod tests {
             activity.effective_model, None,
             "stale attempt cannot claim the worker log"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_model_precedes_worker_session_switch_and_text_cannot_change_activity() {
+        let root = temp_dir("model-precedence");
+        let directory = root.join("children/task-1/sessions/task-1");
+        fs::create_dir_all(&directory).unwrap();
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::write(
+            root.join("tasks/task-1.json"),
+            serde_json::to_vec(&record("completed")).unwrap(),
+        )
+        .unwrap();
+        let path = directory.join("invented_session-1.jsonl");
+        fs::write(&path, "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\"}\n{\"type\":\"model_change\",\"provider\":\"demo\",\"modelId\":\"other-model\"}\n{\"type\":\"message\",\"message\":{\"content\":\"invented secret: demo-2 working accepted\"}}\n").unwrap();
+        let mut reader = Reader::new(OmoConfig {
+            task_directory: root.join("tasks"),
+            ..Default::default()
+        });
+        let activity = reader
+            .collect(&[input()])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(activity.model_label(), Some("Luna"));
+        assert_eq!(activity.state, ActivityState::Finished);
+        assert!(!serde_json::to_string(&activity)
+            .unwrap()
+            .contains("invented secret"));
+        let mut task = record("completed");
+        for key in [
+            "effective_model",
+            "resolved_model",
+            "model",
+            "effectiveModel",
+        ] {
+            task.as_object_mut().unwrap().remove(key);
+        }
+        fs::write(
+            root.join("tasks/task-1.json"),
+            serde_json::to_vec(&task).unwrap(),
+        )
+        .unwrap();
+        let activity = reader
+            .collect(&[input()])
+            .activities
+            .into_values()
+            .next()
+            .unwrap();
+        assert_eq!(activity.model_label(), Some("other-model"));
+        assert_eq!(activity.state, ActivityState::Finished);
+        assert!(!activity.acceptance_ready);
         fs::remove_dir_all(root).unwrap();
     }
 

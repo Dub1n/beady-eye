@@ -349,10 +349,9 @@ remain the baseline. Configuration examples use invented projects.
 
 ## Session identity and detail markers
 
-- [x] Resolve missing model identity from the exact worker session, or the
-  coordinator session for explicitly direct work. Bound/cache log reads, verify
-  session IDs, preserve attempt correlation and never infer liveness/acceptance
-  merely from a model record. Report missing or ambiguous evidence honestly.
+- [x] Verify explicitly linked session identity and recover model identity from
+  structured model-change records, without using conversational content for
+  attribution or execution. Missing or ambiguous identity remains unknown.
 - [x] Use configured fork status markers and bracket colours in detail headers
   and all related-bead sections, including current correlated activity when the
   referenced bead is available, with identical drawing/click geometry.
@@ -412,3 +411,25 @@ when the delegated worker model is unavailable; it must not be called the worker
   and details; retain unknown/unassigned states where source records provide none.
 - [x] Cover session switching, stale/ambiguous registry evidence, idle/working
   panes, hooked-running tasks, completed workers, and incomplete assignments.
+
+## Worker evidence refinement
+
+- [x] Investigate and integrate passive native worker-session status, without conversation content or agent workflow changes. Live-host authentication remains unverified where the advertised credential is unavailable.
+- [x] Distinguish delegated worker and coordinator identities and states in compact rows and details.
+- [x] Explain unknown execution and show worker completion separately from acceptance.
+- [x] Show verified recent worker transitions and distinguish earlier attempts.
+- [x] Investigate explicit bead-linked direct execution events without reading conversations.
+
+OmO 5.1.69 documents activity-neutral `session_status` subscriptions. The
+optional Linux adapter requests child status without content mirroring, verifies
+host identity and correlates only current task/child links. Gaps and disconnected
+hosts cannot provide stream liveness; fresh task evidence remains independent.
+Live authentication on the inspected host remains unverified because the host's
+advertised credential was absent. Never infer bead work from conversation.
+
+The installed OmO 5.1.69 task and session interfaces expose worker/task
+identity and session lineage, but the inspected native task schema does not
+include a bead identity. A current explicit Beads attempt/dispatch receipt is
+the link; a busy direct owner or a related session alone cannot establish
+execution on a particular bead. Native DAG history can contain guidance and
+prompts, so it must not be scanned as a substitute for that link.

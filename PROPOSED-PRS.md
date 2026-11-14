@@ -745,3 +745,35 @@ protocol or ask the provider to report current IDs before upstreaming. Preserve
 canonical ID priority, reject ambiguity and unsupported platforms, and cover PID
 reuse, stale sockets, malformed headers and multiple current sessions. Complete
 the shared contribution gate with invented fixtures.
+
+### Worker role and observation detail (proposal 16 follow-up)
+
+The fork distinguishes a delegated worker's model from the coordinator's,
+explains unknown execution and shows a bounded history of verified worker
+observations across snapshots. History is process-local and does not reconstruct
+missed events or prove acceptance. Before upstream extraction, agree on a generic
+provider and presentation contract, retain upstream defaults, and isolate the
+history cache and role labels from the OmO-specific adapter. Test different
+worker/coordinator identities, attempt changes, stale and conflicting evidence,
+source versus observation times, eviction, restart and narrow rows. Complete the
+shared contribution gate and independent upstream issue/design discussion.
+
+### Status-only native worker subscription (proposal 16 follow-up)
+
+The fork's optional Linux adapter subscribes to structured native child-session
+status without attaching to sessions or mirroring message content. It uses
+explicit current-attempt/task/child/coordinator links, authenticated host
+identity, bounded inputs, sequence checking and expiring snapshots; it does not
+infer a direct owner's current bead from conversation. Session identity is checked from its header; structured model-change metadata
+can supply model identity without using conversation content for attribution.
+
+**To become independent and merge-ready:** Discuss provider ownership and an
+upstream-neutral status interface first; the OmO-specific adapter depends on
+proposal 16's execution/assignment separation and configured identity sources.
+Extract it with defaults and privacy guarantees agreed, and test authentication,
+peer/registry replacement, malformed frames, sequence gaps, expiry, reconnect,
+multiple workers, attempt changes and missing credentials with invented data.
+Verify against supported real native versions, measure polling and connection
+cost, add cross-platform degradation tests, review privacy and endpoint identity,
+and complete the shared contribution gate. A passing synthetic protocol test
+does not establish live host compatibility or upstream CI acceptance.

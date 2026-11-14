@@ -219,16 +219,25 @@ mod linux {
                 continue;
             }
             let mut bytes = Vec::new();
-            let Ok(file) = fs::File::open(file) else {
+            let Ok(mut file) = fs::File::open(file) else {
                 continue;
             };
-            if file.take(8193).read_to_end(&mut bytes).is_err() {
+            let mut complete = false;
+            while bytes.len() < 8192 {
+                let mut byte = [0u8; 1];
+                if !matches!(file.read(&mut byte), Ok(1)) {
+                    break;
+                }
+                if byte[0] == b'\n' {
+                    complete = true;
+                    break;
+                }
+                bytes.push(byte[0]);
+            }
+            if !complete {
                 continue;
             }
-            let Some(end) = bytes.iter().position(|b| *b == b'\n') else {
-                continue;
-            };
-            let header = &bytes[..end];
+            let header = &bytes[..];
             let Ok(header) = serde_json::from_slice::<serde_json::Value>(header) else {
                 continue;
             };

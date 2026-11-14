@@ -82,7 +82,7 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
     let mut history = snap.clone();
     history.refilter(Filter::History);
     assert!(history.trees.iter().any(|t| t.root == "ark-old"));
-    let detail = beady_eye::view::show::said(child, &[], None, 30, 20, &|_| false);
+    let detail = beady_eye::view::show::said(child, &[], None, 120, 80, &|_| false);
     let text = detail
         .rows
         .iter()
@@ -90,6 +90,11 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(text.contains("st_invented") && text.contains("invented-attempt"));
+    assert!(text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .contains("Worker finished; this does not establish outcome or acceptance"));
     // Partial writes retain explicitly qualified last-good terminal evidence.
     std::fs::write(&path, b"{").unwrap();
     let partial = collection.redraw(&cfg, &Unasked, &trackers, Filter::CurrentWork, Utc::now());
@@ -111,6 +116,7 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
     // A later snapshot re-reads native status even when Beads data is identical.
     let mut changed = record.clone();
     changed["status"] = "error".into();
+    changed["updated_at"] = Utc::now().to_rfc3339().into();
     std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
     let next = collection.redraw(&cfg, &Unasked, &trackers, Filter::CurrentWork, Utc::now());
     let child = next
@@ -123,6 +129,13 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
         child.activity.as_ref().unwrap().state,
         ActivityState::Failed
     );
+    let evidence = &child.activity.as_ref().unwrap().evidence;
+    assert!(evidence
+        .iter()
+        .any(|e| e.contains("observed worker history") && e.contains("Finished")));
+    assert!(evidence
+        .iter()
+        .any(|e| e.contains("observed worker history") && e.contains("Failed")));
 }
 
 #[test]
@@ -220,6 +233,25 @@ fn native_live_owners_join_before_snapshot_build_and_link_bead_preview_without_e
                 JoinSource::NativeCoordinator
             }
         );
+        if node.id == "ark-2" {
+            let mut delegated = (*node).clone();
+            let activity = delegated.activity.as_mut().unwrap();
+            activity.coordinator_model = Some("invented/model-a".into());
+            let mut worker = activity.clone();
+            worker.effective_model = Some("invented/worker-model".into());
+            worker.workers.clear();
+            activity.effective_model = worker.effective_model.clone();
+            activity.workers = vec![worker];
+            let delegated_row = beady_eye::view::row::cells(&delegated, None, None, None);
+            assert_eq!(
+                delegated_row.activity_model.as_deref(),
+                Some("worker worker-model / model-a")
+            );
+            assert_eq!(
+                delegated_row.live_agent_state.as_deref(),
+                Some("coord live · ?")
+            );
+        }
         let row = beady_eye::view::row::cells(node, None, None, None);
         assert_eq!(row.activity_model.as_deref(), Some("model-a"));
         assert_eq!(
@@ -244,6 +276,11 @@ fn native_live_owners_join_before_snapshot_build_and_link_bead_preview_without_e
             .join(" ");
         assert!(
             text.contains("Pane: default/w:p1") && text.contains("Agent session: owner-a"),
+            "{text}"
+        );
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            text.contains("Execution unknown: no bead-specific worker task is linked"),
             "{text}"
         );
     }

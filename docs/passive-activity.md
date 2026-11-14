@@ -268,8 +268,8 @@ The viewer reads persistent Beads rows through read-only CLI calls. On each
 snapshot it collects each configured project's referenced native task files,
 validating the dispatch against the current attempt rather than choosing a
 recent task by title or model. It does not enumerate the task directory.
-Duplicate rendered copies share that snapshot's collection. Missing identity can
-be read from explicitly linked native session logs, as described below.
+Duplicate rendered copies share that snapshot's collection. Session IDs are verified from explicitly linked native session headers;
+models come from task fields or structured model-change events in linked sessions.
 
 The OmO adapter understands native snake_case task records, including task ID,
 parent/child sessions, name, agent type, effective model, status and timestamps.
@@ -386,28 +386,16 @@ A current explicit attempt establishes ownership. A native task's recorded model
 remains authoritative. When missing, the adapter follows its worker session ID
 into the native task's sibling `children/<task-id>/sessions/<task-id>` directory.
 A missing worker ID is recoverable only if that exact directory contains one
-unambiguous log whose filename and v3 session header agree. Explicit direct work
-can use the exact coordinator session as its worker identity. Delegated work may
-show a separately verified coordinator as `model (coord)` when the worker model
-is unavailable; it never substitutes that coordinator for the worker. Unresolved
-models can still show a shortened worker/coordinator ID; details retain full IDs.
-One agent may own multiple beads: each current explicit association is displayed.
-Sharing a task/session is not itself a conflict. Explicit native bead, project or
-attempt mismatches remain conflicts. Archived attempts do not become current.
+unambiguous session file whose filename and v3 header agree. Direct work can
+use its coordinator session identity. Models come from structured native task records or model-change events in
+linked sessions; when unavailable, the viewer shows an unknown model or session ID. One agent may own multiple beads. Explicit native bead, project or
+attempt mismatches remain conflicts; archived attempts do not become current.
 
-An attempt UUID is workflow correlation, not necessarily a runtime session ID or
-an attempt-log filename. Existing task records, worker/coordinator session logs
-and Beads history hold different evidence; the viewer follows current explicit
-links rather than guessing from titles or scanning unrelated historical logs.
-
-Session reads examine header/model-change records only, retaining identity and
-file checkpoints rather than transcripts. Directory scans stop at 1,024 entries;
-body reads share a 64 MiB budget per collection, and the cache holds at most 256
-files. Large initial scans continue on later refreshes; shared owners retain
-progress even when another lookup exhausts the budget. Appends are incremental;
-partial final records wait for completion. Missing, ambiguous, malformed or
-unsupported logs are explained in details. A known model does not establish
-current activity, success or acceptance: `model · ?` is valid.
+Session identity verification reads the header only. Model lookup scans linked
+session files incrementally for structured model-change events, discarding message
+fields; it does not infer ownership or execution from conversation content. Large
+or changing files may take several refreshes to resolve. Identity alone does not
+establish current activity, success or acceptance.
 
 Compact bead details use the same bracket markers and bracket-colour setting in
 the heading and related-bead lists (including PARENT and MENTIONS). References to
@@ -498,5 +486,33 @@ with `session_directory` also configured, to resolve an OmO session switch in
 an existing process. On Linux, the reader checks a bounded registry against the
 foreground PID and its lifetime, project task store, a bound native socket and
 the session file header. Ambiguous or unavailable evidence leaves the live
-session unknown. Canonical provider-reported IDs retain priority. No chat text,
-agent instructions, tracker writes or native socket requests are used.
+session unknown. Canonical provider-reported IDs retain priority. No chat text, agent instructions or tracker writes are used.
+
+### Native status stream
+
+On Linux, configuring `runtime_directory` also enables an authenticated,
+status-only OmO `subscribe_sessions` connection where the host supports it.
+The subscription selects the coordinator's children, includes workers, does
+not attach, and requests no message mirrors, dialogs or effects. A matched
+current attempt, task receipt, native task record, child session and parent
+identity are required before status can strengthen worker execution evidence.
+The host and registry are rechecked, sequence gaps and disconnects discard the
+stream projection, and a short expiry forces a fresh snapshot. Where the
+connection or credential is unavailable, the existing task evidence remains;
+unknown never means inactive. The transport is not supported on other platforms.
+
+OmO's session lineage and task identity do not independently name a Beads
+bead. Direct-owner work therefore remains unknown without an explicit current
+attempt-to-task link and matching execution evidence. The native DAG history
+and task projections may contain prompt or progress content and are not used
+to infer bead assignments.
+
+### Worker identity and observed history
+
+Delegated rows name the worker model separately from the coordinator model.
+The details explain why execution is unknown, and distinguish a finished worker
+from acceptance of the bead. The viewer keeps a bounded, in-memory history of
+verified worker states it actually observed during this run. It labels earlier
+attempts and gives the time each transition was first seen; it cannot reconstruct
+unobserved events, and history is lost on restart or eviction. Source timestamps
+and observation times are different. History never establishes acceptance.

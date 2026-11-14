@@ -501,11 +501,20 @@ pub fn cells(
             if node.agent.as_ref().is_some_and(|agent| {
                 agent.source == crate::model::join::JoinSource::NativeCoordinator
             }) {
-                a.coordinator_model_label().map(str::to_owned).or_else(|| {
+                let coordinator = a.coordinator_model_label().map(str::to_owned).or_else(|| {
                     a.coordinator
                         .as_ref()
                         .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
-                })
+                });
+                if !a.workers.is_empty() {
+                    match (a.model_label(), coordinator) {
+                        (Some(worker), Some(coord)) => Some(format!("worker {worker} / {coord}")),
+                        (Some(worker), None) => Some(format!("worker {worker}")),
+                        (None, coord) => coord,
+                    }
+                } else {
+                    coordinator
+                }
             } else {
                 a.owner_label()
             }

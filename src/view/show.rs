@@ -675,6 +675,30 @@ fn said_styled(
                 facts.push(format!("{label}: {value}"));
             }
         }
+        if node.execution_state() == crate::collect::omo::ExecutionState::Unknown {
+            let reason = if activity.fresh == Some(false) {
+                "Execution unknown: the activity record is stale and cannot establish a heartbeat"
+            } else if activity.state == crate::collect::omo::ActivityState::Conflict {
+                "Execution unknown: current activity records conflict"
+            } else if activity.attempt_id.as_deref().is_none_or(str::is_empty) {
+                "Execution unknown: no current attempt identity is available"
+            } else if !activity.workers.is_empty()
+                && activity
+                    .workers
+                    .iter()
+                    .all(|worker| worker.attempt_id != activity.attempt_id)
+            {
+                "Execution unknown: worker records do not match the current attempt"
+            } else if activity.task_id.is_none() && activity.workers.is_empty() {
+                "Execution unknown: no bead-specific worker task is linked"
+            } else {
+                "Execution unknown: linked records do not establish current worker activity"
+            };
+            facts.push(reason.into());
+        }
+        if activity.state == crate::collect::omo::ActivityState::Finished {
+            facts.push("Worker finished; this does not establish outcome or acceptance".into());
+        }
         if let Some(observed) = activity.observed_at {
             facts.push(format!("Source observation: {}", observed.to_rfc3339()));
         }
@@ -693,6 +717,9 @@ fn said_styled(
                 if let Some(value) = value {
                     facts.push(format!("  {label}: {value}"));
                 }
+            }
+            if let Some(observed) = worker.observed_at {
+                facts.push(format!("  Source observation: {}", observed.to_rfc3339()));
             }
             facts.extend(worker.evidence.iter().map(|e| format!("  Evidence: {e}")));
         }
