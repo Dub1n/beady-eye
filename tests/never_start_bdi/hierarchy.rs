@@ -356,3 +356,15 @@ fn regex_exclusions_apply_to_every_status_and_reject_invalid_configuration() {
         .viewport(0, view.lines().len())
         .any(|(_, line)| line.bead().is_some_and(|key| key.id == "ark-1")));
 }
+
+#[test]
+fn hidden_root_indentation_accepts_explicit_and_compatible_setting_names() {
+    let project = "[[projects]]\nname='arkham'\npath='/srv/invented/arkham'\n";
+    for value in ["never", "single-tree", "always"] {
+        let old = Config::from_toml(&format!("{project}[row]\nroot_indent='{value}'\n")).unwrap();
+        let new =
+            Config::from_toml(&format!("{project}[row]\nhide_root_indent='{value}'\n")).unwrap();
+        assert_eq!(old.row, new.row);
+    }
+    assert!(Config::from_toml(&format!("{project}[row]\nhide_root_indent='sometimes'\n")).is_err());
+}

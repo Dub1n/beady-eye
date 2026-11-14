@@ -180,6 +180,7 @@ impl<'de> Deserialize<'de> for Cell {
 #[serde(default, deny_unknown_fields)]
 pub struct Layout {
     /// Remove the project-to-bead indentation in compact trees.
+    #[serde(rename = "hide_root_indent", alias = "root_indent")]
     pub root_indent: RootIndent,
     /// Jump to matches by default; optionally filter the visible tree.
     pub search_mode: SearchMode,

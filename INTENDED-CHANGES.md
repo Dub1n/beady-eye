@@ -337,3 +337,11 @@ remain the baseline. Configuration examples use invented projects.
   single spaces and completion fraction last.
 - [x] Configurable minimum preview height, bounded by available terminal space.
   Optional delimiter dragging only if it fits the existing event architecture.
+
+## Root indentation consistency follow-up
+
+- [x] Apply hidden project-root indentation consistently to project groups,
+  unclaimed panes, unread roots, notes and completed runs, retaining group fold
+  controls and nested structure. Cover always and single-tree modes.
+- [x] Name the setting `hide_root_indent` so `always` clearly means always hide;
+  accept the old `root_indent` spelling without changing its meaning.

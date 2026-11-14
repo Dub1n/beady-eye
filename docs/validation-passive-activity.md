@@ -224,3 +224,26 @@ up before translating numeric/boolean draft values to the documented enum values
 and adding the user's explicit title exclusion; private config values and data
 are not included here. Delimiter dragging is not implemented: the preview minimum
 is configurable, and its read sizing follows the actual rendered band.
+
+
+## 0.43.1 consistent project-root indentation
+
+Hidden root indentation now applies to project groups and unclaimed panes as
+well as beads, unread roots, notes, orphaned dependencies and completed runs.
+Group fold markers remain visible, and global groups retain their own hierarchy.
+`hide_root_indent` is the explicit config name; `root_indent` remains an alias
+with unchanged semantics. The local key was migrated after a backup, preserving
+its value.
+
+Rendering tests cover never/always/single-tree, one/multiple project headings,
+Unicode/ASCII, connector widths 1/2/3/16, open/closed project groups, unclaimed
+panes, notes, completed runs and independent global sections. Configuration tests
+cover all three values using either spelling and rejection of invalid values.
+
+All 44 Cargo test targets are passing (2,787 tests, 3 ignored). The full run's
+only failure was the new configuration fixture omitting a required invented
+project; after correcting that setup, its entire 111-test target passed.
+Clippy with warnings denied, formatting, the three extracted upstream source
+scans, clean package verification and the canonical release installation passed.
+The installed binary reports 0.43.1. Nix/macOS and a fresh live Herdr pane were
+not exercised; reopening the viewer loads the installed version.
