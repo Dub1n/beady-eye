@@ -179,6 +179,9 @@ impl<'de> Deserialize<'de> for Cell {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Layout {
+    /// Colour square brackets with the status; false inherits the normal row colour.
+    #[serde(default = "default_true")]
+    pub colour_brackets: bool,
     /// Start in the dependency graph rather than the ownership tree.
     #[serde(default)]
     pub dependencies: bool,
@@ -199,14 +202,14 @@ pub struct Layout {
     #[serde(default)]
     pub show_ids: bool,
     /// Use compact bracket markers and ID-free rows.
-    #[serde(default = "default_compact")]
+    #[serde(default = "default_true")]
     pub compact: bool,
 }
 
 const fn default_indent() -> u8 {
     2
 }
-const fn default_compact() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -214,6 +217,7 @@ impl Default for Layout {
     /// A compact tree row with the status marker and no repeated bead ID.
     fn default() -> Self {
         Self {
+            colour_brackets: true,
             dependencies: false,
             identity: vec![Cell::Glyph],
             title: vec![Cell::Title, Cell::Badges],
@@ -222,7 +226,7 @@ impl Default for Layout {
             indent: default_indent(),
             ascii: false,
             show_ids: false,
-            compact: default_compact(),
+            compact: default_true(),
         }
     }
 }

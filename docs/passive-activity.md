@@ -147,6 +147,7 @@ indent = 2
 ascii = false
 show_ids = false
 compact = true
+colour_brackets = true # false: normal text colour for [ and ], status colour inside
 
 [tui]
 refresh_seconds = 2
@@ -164,6 +165,13 @@ well as cleanup, without guessing from their close reason. Nothing
 is classified from a loose title substring. Fixture exclusion is view-only,
 counted and reversible using `x`. Do not confuse these disposable records with
 legitimate fixture-development work. No historical tracker cleanup is performed.
+
+`colour_brackets = true` (the default) colours the entire three-character status
+marker. With `false`, `[` and `]` inherit normal row text colour while the centre
+character keeps its status colour. This applies to bracket markers in tree,
+graph and ready rows. Selection highlighting is preserved in both modes.
+Compact branch connectors touch the marker directly, for example `├─[~]`, without
+changing the configured indentation step or open/collapsed alignment.
 
 `indent` controls tree spacing, `ascii` provides font-independent connectors and
 `show_ids` can restore IDs when wanted. Width fitting reduces optional fields
