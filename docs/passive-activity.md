@@ -335,10 +335,10 @@ override first. Unknown activity is `?` on the right of a row, separate from the
 blocked state marker `[?]` at its left.
 
 A click selects a bead. A click on an already selected parent toggles its fold;
-a second click on the same bead within 400 ms sets it as root. Ctrl+click reveals
-one parent root level and selects the clicked bead. These gestures use the same
-root actions as Ctrl+Space and Backspace. The terminal must forward mouse events
-and the Ctrl modifier. Sticky project headings are clickable; overflow dots and
+a second click on the same bead within 400 ms opens its details. Alt+click sets
+the clicked bead as root (Ctrl+Space remains the keyboard alternative). Ctrl+click
+reveals one parent root level and selects the clicked bead, as Backspace does.
+The terminal must forward mouse events and the relevant modifier. Sticky project headings are clickable; overflow dots and
 the status legend are not bead rows.
 
 `hide_root_indent` names the act of hiding: `"always"` always removes the
@@ -422,3 +422,7 @@ as expanded beads; opening the bead removes the hint. Selecting hidden completed
 not promote its tree into the main section on refresh. Explicit rooting remains
 available. Preview rows ignore trailing blank capture padding when deciding
 whether content was truncated; genuine clipped text still carries an ellipsis.
+
+Explicitly collapsing a completed parent takes precedence over automatic
+expansion used to retain a completed selection. The fold stays collapsed across
+refreshes until the user changes it; completed-child visibility still follows `z`.

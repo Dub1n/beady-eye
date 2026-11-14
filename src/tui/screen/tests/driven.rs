@@ -608,3 +608,30 @@ fn a_notch_moves_the_forest_three_lines() {
         "the new top indicator offsets one of the three scrolled lines ({was} to {now}): {after:#?}"
     );
 }
+
+#[test]
+fn double_click_opens_details_through_the_real_screen_and_loop() {
+    let (mut screen, _) = Run::over(THE_DESCRIBED_SUBTREE).screen();
+    screen.shown = shown(a_grove(4));
+    screen.shown.drawing.layout = Layout::default();
+    screen
+        .shown
+        .forest
+        .laid_out_to(screen.shown.drawing.layout.clone());
+    let at = screen
+        .shown
+        .forest
+        .lines()
+        .viewport(0, screen.shown.forest.lines().len())
+        .find(|(_, line)| line.bead().is_some())
+        .unwrap()
+        .0;
+    let key = screen.shown.forest.lines()[at].bead().unwrap().clone();
+    let row = at as u16;
+    driven(
+        &mut screen,
+        &waiting(vec![Event::Clicked(row), Event::Clicked(row)]),
+    );
+    assert_eq!(window_over(&drawn(&screen)), Some(key.id));
+    assert!(screen.shown.forest.focused_on().is_empty());
+}

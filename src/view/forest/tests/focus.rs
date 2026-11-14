@@ -1475,3 +1475,62 @@ fn no_agent_group_obeys_completed_toggle_and_never_leaves_excluded_placeholders(
     assert!(!drawn_here(&forest, "[fixture hidden]"));
     assert!(!drawn_here(&forest, "Invented excluded work"));
 }
+
+#[test]
+fn completed_selection_can_be_collapsed_and_stays_collapsed_after_refresh() {
+    for dependencies in [false, true] {
+        for focused in [false, true] {
+            for children_closed in [false, true] {
+                let mut forest = flatten_compact(snapshot());
+                forest.laid_out_to(row::Layout {
+                    dependencies,
+                    ..row::Layout::default()
+                });
+                if children_closed {
+                    forest.apply(Action::ToggleCompleted);
+                }
+                select_bead(&mut forest, "dun-7.1");
+                if focused {
+                    forest.apply(Action::RootSelected);
+                }
+                let changed = edited(
+                    DUNWICH,
+                    r#""id":"dun-7.1","title":"re-point the dish","status":"open""#,
+                    r#""id":"dun-7.1","title":"re-point the dish","status":"closed""#,
+                );
+                let changed = if children_closed {
+                    changed.replace("\"status\":\"open\"", "\"status\":\"closed\"")
+                } else {
+                    changed
+                };
+                let refreshed = gather(
+                    vec![tree_of("dunwich", &changed)],
+                    Vec::new(),
+                    Filter::CurrentWork,
+                );
+                forest.refresh(refreshed.clone());
+                assert!(forest.preserve_completed.is_some());
+                forest.apply(Action::CollapseSubtree);
+                for refresh in [false, true] {
+                    if refresh {
+                        forest.refresh(refreshed.clone());
+                    }
+                    assert_eq!(
+                        forest.lines()[forest.selected_line()].folded,
+                        Some(false),
+                        "dependencies={dependencies} focused={focused}"
+                    );
+                    assert!(!forest
+                        .lines()
+                        .iter()
+                        .any(|line| line.bead().is_some_and(|key| key.id == "dun-7.1.2")));
+                }
+                forest.apply(Action::ExpandSubtree);
+                assert!(forest
+                    .lines()
+                    .iter()
+                    .any(|line| line.bead().is_some_and(|key| key.id == "dun-7.1.2")));
+            }
+        }
+    }
+}

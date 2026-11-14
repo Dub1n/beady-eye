@@ -329,7 +329,8 @@ remain the baseline. Configuration examples use invented projects.
 - [x] Remove redundant directory-scope explanatory row from compact views.
 - [x] Keep concise selected-status legend at the bottom of the bead band,
   sharing its row with bottom overflow dots.
-- [x] Mouse: double-click sets root; Ctrl+click goes up one root level and selects
+- [x] Mouse (revised below): Alt+click sets root; double-click opens details;
+  Ctrl+click goes up one root level and selects
   the clicked bead; click an already selected parent toggles its fold.
 - [x] Sticky project headers with counts and overflow dots: configurable active
   header or all hidden headers at top/bottom, respecting tiny terminal capacity.
@@ -377,3 +378,10 @@ when the delegated worker model is unavailable; it must not be called the worker
 - [x] Keep collapsed arrows in the branch for beads with a horizontal connector.
   Only branchless beads use `[ ]▸ Title`, consuming an existing separator cell so
   titles stay aligned with expanded rows. Preserve ASCII and legacy layouts.
+
+## Completed folds and pointer actions
+
+- [x] Explicit fold choices override automatic expansion of preserved completed
+  selections, consistently in rendering and row counts, including refreshes.
+- [x] Double-click opens the clicked bead's details; Alt+click sets it as root.
+  Keep Ctrl+click for parent-root navigation and Ctrl+Space as a keyboard fallback.

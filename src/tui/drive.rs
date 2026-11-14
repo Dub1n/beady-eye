@@ -34,6 +34,7 @@ pub(super) enum Event {
     /// A left click, on the row of the screen it landed on.
     Clicked(u16),
     CtrlClicked(u16),
+    AltClicked(u16),
     /// A wheel notch, and which way it turned.
     Scrolled(Notch),
     /// Text the reader pasted, all of it.
@@ -295,6 +296,14 @@ pub(super) trait View {
     /// is the loop's other seam: the loop knows where the pointer was and
     /// nothing about what is drawn there.
     fn clicked(&mut self, row: u16) -> bool;
+    /// Consume a double-click detail request; the loop owns popup state.
+    fn take_clicked_details(&mut self) -> bool {
+        false
+    }
+    /// Set the bead under an Alt+click as the displayed root.
+    fn root_clicked(&mut self, _row: u16) -> bool {
+        false
+    }
     /// Go up one displayed root while selecting the pointer's bead.
     fn ctrl_clicked(&mut self, row: u16) -> bool {
         self.clicked(row)
@@ -576,7 +585,7 @@ fn sleeps_for(
 /// moves no fold and no selection.
 fn keeps_what_is_open(event: &Event, showing: Showing) -> bool {
     match event {
-        Event::Key(_) | Event::Clicked(_) | Event::CtrlClicked(_)
+        Event::Key(_) | Event::Clicked(_) | Event::CtrlClicked(_) | Event::AltClicked(_)
             if showing == Showing::Searching =>
         {
             false
@@ -585,7 +594,7 @@ fn keeps_what_is_open(event: &Event, showing: Showing) -> bool {
             action(*key),
             Some(Action::NextMatch | Action::PreviousMatch | Action::Search)
         ),
-        Event::Clicked(_) | Event::CtrlClicked(_) => true,
+        Event::Clicked(_) | Event::CtrlClicked(_) | Event::AltClicked(_) => true,
         _ => false,
     }
 }
@@ -604,7 +613,11 @@ fn answered(
     // on the foot after the first press has taken it off, not before.
     let pressed = matches!(
         event,
-        Event::Key(_) | Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
+        Event::Key(_)
+            | Event::Clicked(_)
+            | Event::CtrlClicked(_)
+            | Event::AltClicked(_)
+            | Event::Scrolled(_)
     ) && view.pressed();
     if keeps_what_is_open(&event, *showing) {
         view.keep_what_is_open();
@@ -757,7 +770,7 @@ fn answered(
         // A click or a notch takes the bindings away and does no more,
         // for the same reason a key does: the window is over the forest,
         // so the rows under the pointer are rows nobody can see.
-        Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
+        Event::Clicked(_) | Event::CtrlClicked(_) | Event::AltClicked(_) | Event::Scrolled(_)
             if *showing == Showing::Bindings =>
         {
             *showing = Showing::Forest;
@@ -766,7 +779,7 @@ fn answered(
         // And it leaves the prompt, which is a reader looking away from what
         // they were typing. The forest goes back to how it stood at `/`, as
         // Esc puts it back: what they typed was never confirmed.
-        Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
+        Event::Clicked(_) | Event::CtrlClicked(_) | Event::AltClicked(_) | Event::Scrolled(_)
             if *showing == Showing::Searching =>
         {
             *showing = Showing::Forest;
@@ -789,9 +802,18 @@ fn answered(
         // distance: a reader turning the wheel is making one gesture and it
         // covers the same ground wherever they are looking.
         Event::Scrolled(notch) if *showing == Showing::Bead => view.scrolled_bead(notch),
-        Event::CtrlClicked(_) if *showing == Showing::Bead => false,
+        Event::CtrlClicked(_) | Event::AltClicked(_) if *showing == Showing::Bead => false,
         Event::CtrlClicked(row) => view.ctrl_clicked(row),
-        Event::Clicked(row) => view.clicked(row),
+        Event::AltClicked(row) => view.root_clicked(row),
+        Event::Clicked(row) => {
+            let changed = view.clicked(row);
+            if view.take_clicked_details() && view.apply(Action::ShowBead) {
+                *showing = Showing::Bead;
+                true
+            } else {
+                changed
+            }
+        }
         Event::Scrolled(notch) => view.scrolled(notch),
         Event::Resize => true,
         Event::Changed(wanted) => asked_for(view, outstanding, wanted),

@@ -20,7 +20,7 @@ fn pointer_row(shown: &Shown, screen: Rect, at: usize) -> u16 {
 }
 
 #[test]
-fn selected_parent_click_toggles_and_double_click_sets_root() {
+fn selected_parent_click_toggles_and_double_click_requests_details() {
     let mut shown = shown(a_grove(4));
     shown.drawing.layout = Layout::default();
     shown.forest.laid_out_to(shown.drawing.layout.clone());
@@ -39,10 +39,31 @@ fn selected_parent_click_toggles_and_double_click_sets_root() {
     assert!(shown.clicked(screen, row));
     assert_eq!(shown.forest.lines()[at].folded, was.map(|open| !open));
     assert!(shown.clicked(screen, row));
-    assert!(
-        !shown.forest.focused_on().is_empty(),
-        "second click sets a root"
-    );
+    assert!(shown.clicked_details, "second click requests details");
+}
+
+#[test]
+fn alt_click_sets_the_clicked_bead_as_root_without_toggling_or_requesting_details() {
+    let mut shown = shown(a_grove(4));
+    shown.drawing.layout = Layout::default();
+    shown.forest.laid_out_to(shown.drawing.layout.clone());
+    shown.forest.apply(Action::ExpandForest);
+    let at = shown
+        .forest
+        .lines()
+        .viewport(0, shown.forest.lines().len())
+        .filter(|(_, line)| line.bead().is_some())
+        .nth(1)
+        .unwrap()
+        .0;
+    let key = shown.forest.lines()[at].bead().unwrap().clone();
+    let screen = Rect::new(0, 0, 80, 24);
+    let row = pointer_row(&shown, screen, at);
+    assert!(shown.root_clicked(screen, row));
+    assert_eq!(shown.selected_bead(), Some(&key));
+    assert_eq!(shown.forest.focused_on(), BTreeSet::from([key]));
+    assert!(!shown.clicked_details);
+    assert!(shown.last_click.is_none());
 }
 
 #[test]
