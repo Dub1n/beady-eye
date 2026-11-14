@@ -141,6 +141,7 @@ struct Shown {
     forest: Forest,
     bindings_offset: usize,
     last_click: Option<(BeadKey, std::time::Instant)>,
+    clicked_details: bool,
     panes: Box<dyn Panes>,
     /// Where the terminal's clipboard is written: the terminal itself, by
     /// escape sequence, so the write travels the way every other byte `bdi`
@@ -259,6 +260,7 @@ impl Shown {
         let mut shown = Self {
             bindings_offset: 0,
             last_click: None,
+            clicked_details: false,
             tail: tail::tail(&forest),
             tailing: tail::target(&forest).pane().cloned(),
             tail_band: TailBand::Shown,
@@ -603,7 +605,11 @@ impl Shown {
             self.last_click = Some((key, now));
             if double {
                 self.last_click = None;
-                return self.apply(Action::RootSelected);
+                if let Some(at) = at {
+                    self.select(at);
+                }
+                self.clicked_details = true;
+                return true;
             }
         } else {
             self.last_click = None;
@@ -624,6 +630,33 @@ impl Shown {
             // past the last line of the forest holds nothing at all.
             None => false,
         }
+    }
+
+    fn root_clicked(&mut self, screen: Rect, row: u16) -> bool {
+        let bands = draw::regions_for_layout(
+            screen,
+            self.forest.lines().len(),
+            self.tail_band,
+            &self.drawing.layout,
+        );
+        self.forest.fit(bands.forest.height as usize);
+        let Some(at) = draw::forest_line_at(bands.forest, &self.forest, &self.drawing.layout, row)
+        else {
+            return false;
+        };
+        if self
+            .forest
+            .lines()
+            .get(at)
+            .and_then(|line| line.bead())
+            .is_none()
+        {
+            return false;
+        }
+        self.last_click = None;
+        self.clicked_details = false;
+        self.select(at);
+        self.apply(Action::RootSelected)
     }
 
     fn ctrl_clicked(&mut self, screen: Rect, row: u16) -> bool {
@@ -1399,6 +1432,15 @@ impl<B: PutBack> View for Screen<B> {
         self.shown.clicked(screen, row)
     }
 
+    fn take_clicked_details(&mut self) -> bool {
+        std::mem::take(&mut self.shown.clicked_details)
+    }
+
+    fn root_clicked(&mut self, row: u16) -> bool {
+        let screen = self.terminal.get_frame().area();
+        self.shown.root_clicked(screen, row)
+    }
+
     fn ctrl_clicked(&mut self, row: u16) -> bool {
         let screen = self.terminal.get_frame().area();
         self.shown.ctrl_clicked(screen, row)
@@ -1568,7 +1610,7 @@ mod tests {
             .map(|binding| (binding.keys, binding.does))
             .chain(AT_THE_PROMPT.iter().map(|row| (row.keys, row.does)))
             .collect::<Vec<_>>();
-        let drawn = window_inner(100, tables.len() as u16 + 2);
+        let drawn = window_inner(100, bindings().len() as u16 + 3);
 
         for (keys, does) in tables {
             let named = keys
@@ -1698,6 +1740,7 @@ mod tests {
                 "  Home, H   restore the default current-work forest",
                 "  g         move to the first row",
                 "  End, G    move to the last row",
+                "  Mouse     double-click: details; Alt+click: root; Ctrl+click: parent",
                 "  Enter     while searching, stay on the bead the search has gone to",
                 "  Esc       while searching, stop and put the forest back",
                 "  Left      while searching, move back one character",

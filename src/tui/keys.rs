@@ -448,12 +448,20 @@ pub(super) fn typing(key: KeyEvent) -> Option<Typing> {
 /// The prompt's own keys come last. Every one of them is a key a reader
 /// already presses at a shell prompt, so they are the most guessable of all.
 pub(super) fn bindings() -> Vec<(String, &'static str)> {
-    BINDINGS
+    let mut rows: Vec<_> = BINDINGS
         .iter()
         .map(|binding| (binding.keys, binding.does))
         .chain(AT_THE_PROMPT.iter().map(|row| (row.keys, row.does)))
         .map(|(keys, does)| (named(keys), does))
-        .collect()
+        .collect();
+    rows.insert(
+        BINDINGS.len(),
+        (
+            "Mouse".into(),
+            "double-click: details; Alt+click: root; Ctrl+click: parent",
+        ),
+    );
+    rows
 }
 
 fn named(keys: &[Key]) -> String {

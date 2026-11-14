@@ -300,3 +300,22 @@ All 2,800 Cargo tests passed (3 ignored, 44 reported targets). Formatting,
 production/all-target Clippy with warnings denied, and the three extracted
 upstream source scans passed. The canonical installed binary reports 0.44.1.
 Nix/macOS and a fresh live Herdr pane were not exercised; no pane was restarted.
+
+## 0.44.2 completed folds and mouse details
+
+Preserving a completed selection no longer forces expansion over an explicit
+fold choice. Rendering and row counts use the same precedence. Invented
+regressions cover nested/focused parents in ownership/dependency views, open and
+completed descendants, reopening and collapse persistence through refreshes.
+
+Double-click now opens details through the real Screen/loop hand-off, rather than
+setting root. Alt+click selects its target and invokes the existing root action;
+Ctrl+click retains parent-root navigation. Modifier decoding, target identity,
+detail popup state and help rendering are covered separately. Pointer gestures
+remain presentation-only and Ctrl+Space is the keyboard root alternative.
+
+All 2,804 Cargo tests passed (3 ignored, 44 reported targets). Formatting,
+production/all-target Clippy with warnings denied and the three extracted
+upstream source scans passed. The canonical installed binary reports 0.44.2.
+Nix/macOS and a fresh live Herdr pane were not exercised; the user's pane was
+not restarted. Empty remote checks do not constitute a green CI verdict.

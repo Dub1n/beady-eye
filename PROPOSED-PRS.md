@@ -456,8 +456,9 @@ ancestry tests and real terminal case.
 - Complete the shared readiness gate. Any claimed existing upstream navigation
   defect still needs its own untouched-upstream reproducer.
 
-**Fork follow-up (2026-11-14):** Double-clicking a bead invokes the existing
-set-root action; Ctrl+click invokes parent-root navigation and selects the clicked
+**Fork follow-up (2026-11-14, revised in 0.44.2):** Double-clicking a bead opens
+details; Alt+click invokes the existing set-root action, with Ctrl+Space as a
+keyboard fallback. Ctrl+click invokes parent-root navigation and selects the clicked
 bead. Record the clicked identity before parent lookup so a deferred ancestry
 collection restores that target rather than the former selection. The fork has
 an invented partial-snapshot mouse regression for this case.
@@ -465,7 +466,8 @@ Clicking an already selected parent toggles expansion. Keep gesture
 recognition, identity, viewport hit-testing and modifier forwarding together;
 exclude tracker/provider code. Test repeated titles across projects, the 400 ms
 boundary, changing rows between clicks, sticky headings, blank/legend clicks,
-focused ancestry after refresh and terminals lacking Ctrl+mouse support. Mouse
+focused ancestry after refresh and terminals lacking modifier+mouse support. Cover the full event-to-window
+transition for double-clicks, not just selection or a queued detail request. Mouse
 support is separable from rebinding keys. Always redraw a changed root scope
 even if its visible rows happen to remain identical.
 
@@ -624,6 +626,25 @@ height configuration: trim only trailing plain spaces from styled capture spans,
 preserve meaningful content/styles and mark real clipping. Reproduce with invented
 padded SGR/plain rows, widths and genuine overflow; run existing preview tests and
 the shared contribution gate. No source terminal or Herdr controls are changed.
+
+## 14. Respect explicit completed-parent fold choices
+
+**Tentative title:** `fix(view): preserve explicit completed-parent folds`
+
+The fork's completed-selection retention could force a parent open after an
+explicit collapse. In 0.44.2 explicit fold choices take precedence over automatic
+inspection expansion in `src/view/forest/layout.rs` (including cached/lazy row
+counts); regressions in `src/view/forest/tests/focus.rs` cover nested
+and focused completed parents, both graph projections and refresh persistence.
+
+**To become independent and merge-ready:** This is currently a fork-specific fix,
+not a demonstrated upstream defect. Reproduce it on untouched upstream first;
+otherwise include it only with the optional completed-selection retention feature
+that introduces the condition. Keep retention, visibility and fold choice distinct;
+do not bundle mouse changes or provider logic. Test open and closed descendants,
+completed visibility toggles, reopening, focused roots, cached/lazy row counts and
+refresh. Complete the shared contribution gate before proposing it upstream.
+
 
 ## Recommended extraction order and maintenance strategy
 

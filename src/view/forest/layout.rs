@@ -890,7 +890,7 @@ impl<'a> TreeLayout<'a> {
             .preserve_completed
             .is_some_and(|key| root.key() == key);
         let open = !kids.is_empty()
-            && (inspected || pointed.unwrap_or(!self.rests_shut && bead.opens_a_fold));
+            && pointed.unwrap_or(inspected || (!self.rests_shut && bead.opens_a_fold));
         let below = folds.beneath(&handle, over);
 
         let folded = (!kids.is_empty()).then_some(open);
@@ -1105,7 +1105,7 @@ impl<'a> TreeLayout<'a> {
             .layout
             .preserve_completed
             .is_some_and(|key| place.key() == key);
-        let open = !kids.is_empty() && (inspected || pointed.unwrap_or(stand.rests_open(&bead)));
+        let open = !kids.is_empty() && pointed.unwrap_or(inspected || stand.rests_open(&bead));
         let below = folds.beneath(&handle, over);
         let folded = (!kids.is_empty()).then_some(open);
         let line = bead_line(
@@ -1365,7 +1365,7 @@ fn count(
     let inspected = visibility
         .preserve
         .is_some_and(|key| tree.beads[at].is(key));
-    let open = kids && (inspected || forced.unwrap_or(stand.rests_open(answers.bead(at))));
+    let open = kids && forced.unwrap_or(inspected || stand.rests_open(answers.bead(at)));
     let mut total = Count {
         rows: 1,
         widths: Widths::default(),
@@ -1508,7 +1508,7 @@ fn undrawn_node(
     let bead = answers.bead(at);
     let rests_open = counted.stand.rests_open(bead);
     let inspected = visibility.preserve.is_some_and(|key| node.is(key));
-    let open = kids && (inspected || counted.forced.unwrap_or(rests_open));
+    let open = kids && counted.forced.unwrap_or(inspected || rests_open);
     let folded = kids.then_some(open);
     let line = bead_line(
         node,

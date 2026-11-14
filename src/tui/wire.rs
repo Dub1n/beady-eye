@@ -290,6 +290,8 @@ fn incoming(read: event::Event) -> Option<Event> {
             MouseEventKind::Down(MouseButton::Left) => {
                 Some(if mouse.modifiers.contains(event::KeyModifiers::CONTROL) {
                     Event::CtrlClicked(mouse.row)
+                } else if mouse.modifiers.contains(event::KeyModifiers::ALT) {
+                    Event::AltClicked(mouse.row)
                 } else {
                     Event::Clicked(mouse.row)
                 })
@@ -690,5 +692,14 @@ mod tests {
             Some(Event::Changed(arkham())),
             "what a writer said on the socket reached the loop as a project to collect for"
         );
+    }
+    #[test]
+    fn alt_left_click_is_forwarded_as_a_root_gesture() {
+        let mut click = moused(MouseEventKind::Down(MouseButton::Left), 7);
+        let event::Event::Mouse(ref mut mouse) = click else {
+            unreachable!()
+        };
+        mouse.modifiers = KeyModifiers::ALT;
+        assert_eq!(incoming(click), Some(Event::AltClicked(7)));
     }
 }
