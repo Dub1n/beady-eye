@@ -647,6 +647,8 @@ impl Shown {
             return false;
         };
         shown.last_click = None;
+        // RootUp carries this identity through an ancestry read if needed.
+        shown.forest.select_line(at);
         shown.forest.apply(Action::RootUp);
         shown.forest.go_to(&key);
         shown.moved(true)

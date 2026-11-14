@@ -188,7 +188,7 @@ maintaining that checklist, the user guide and [PROPOSED-PRS.md](../PROPOSED-PRS
 part of future changes. The proposal catalogue records extraction boundaries and
 readiness requirements; no contribution has been submitted upstream.
 
-The final full locked Cargo suite passed **2,784 tests, zero failed, 3 ignored
+The final full locked Cargo suite passed **2,785 tests, zero failed, 3 ignored
 across 44 reported targets**, including the focused rendering regression for
 unknown activity without a model (`? 1/4`) and with one (`Luna · ? 1/4`). Tests use invented
 records and the existing draining terminal driver. Coverage includes:
@@ -205,7 +205,9 @@ records and the existing draining terminal driver. Coverage includes:
 - Both sticky heading modes and plain overflow, source-row hit testing across
   scroll offsets, tiny heights, last-row selection and root marker alignment.
 - Preview minimum clamping, selected-parent folding, double-click set-root and
-  Ctrl+click parent-root selection.
+  Ctrl+click parent-root selection, including a parent outside the loaded
+  subtree. A focused partial-snapshot regression verifies that the clicked
+  target is still selected after the ancestry collection returns.
 - Updated real terminal status-legend checks at 30/40/60/80 columns, retaining
   full IDs in details and the separate dependency/ownership views.
 

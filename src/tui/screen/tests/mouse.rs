@@ -76,3 +76,57 @@ fn control_click_reveals_parent_root_and_selects_clicked_child() {
     assert!(shown.forest.focused_on().is_empty());
     assert_eq!(shown.selected_bead(), Some(&key));
 }
+
+#[test]
+fn control_click_keeps_its_target_while_missing_ancestry_is_collected() {
+    let mut partial = a_grove(3);
+    let mut tree = (*partial.collected[0]).clone();
+    tree.beads[0].parent = Some(Related {
+        project: None,
+        id: "grv-upper".into(),
+        edge: Edge::ParentChild,
+        status: Some(Status::Open),
+        title: None,
+    });
+    partial.collected = vec![Arc::new(tree.clone())];
+    partial.refilter(Filter::All);
+    let mut complete = partial.clone();
+    let mut upper = tree.beads[0].clone();
+    upper.id = "grv-upper".into();
+    upper.parent = None;
+    upper.title = "Invented enclosing work".into();
+    tree.beads.push(upper);
+    tree.children.push(vec![Link {
+        bead: 0,
+        edge: Edge::ParentChild,
+        first: true,
+    }]);
+    tree.root = "grv-upper".into();
+    tree.counts = Counts::over(&tree.beads);
+    complete.collected = vec![Arc::new(tree)];
+    complete.refilter(Filter::All);
+
+    let mut shown = shown(partial);
+    shown.drawing.layout = Layout::default();
+    shown.forest.laid_out_to(shown.drawing.layout.clone());
+    shown.forest.go_to(&bead("grove", "grv-1"));
+    shown.apply(Action::RootSelected);
+    shown.apply(Action::ExpandForest);
+    let clicked = bead("grove", "grv-1.2");
+    let at = shown
+        .forest
+        .lines()
+        .viewport(0, shown.forest.lines().len())
+        .find(|(_, line)| line.bead() == Some(&clicked))
+        .unwrap()
+        .0;
+    let screen = Rect::new(0, 0, 80, 24);
+    let row = pointer_row(&shown, screen, at);
+    assert!(shown.ctrl_clicked(screen, row));
+    assert_eq!(
+        shown.forest.focused_on(),
+        [bead("grove", "grv-upper")].into()
+    );
+    shown.collected(complete);
+    assert_eq!(shown.selected_bead(), Some(&clicked));
+}

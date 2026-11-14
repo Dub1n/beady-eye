@@ -430,7 +430,10 @@ ancestry tests and real terminal case.
 
 **Fork follow-up (2026-11-14):** Double-clicking a bead invokes the existing
 set-root action; Ctrl+click invokes parent-root navigation and selects the clicked
-bead. Clicking an already selected parent toggles expansion. Keep gesture
+bead. Record the clicked identity before parent lookup so a deferred ancestry
+collection restores that target rather than the former selection. The fork has
+an invented partial-snapshot mouse regression for this case.
+Clicking an already selected parent toggles expansion. Keep gesture
 recognition, identity, viewport hit-testing and modifier forwarding together;
 exclude tracker/provider code. Test repeated titles across projects, the 400 ms
 boundary, changing rows between clicks, sticky headings, blank/legend clicks,
