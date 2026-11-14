@@ -164,6 +164,8 @@ pub struct Collection {
         BTreeMap<String, (crate::collect::omo::OmoConfig, crate::collect::omo::Reader)>,
     >,
     read: BTreeMap<String, Read>,
+    /// Bounded observations made during this viewer's lifetime.
+    activity_history: std::sync::Mutex<crate::collect::omo::history::History>,
     /// Which panes each session last answered with. A session that answers
     /// replaces its own entry and no other's, and one the provider has
     /// stopped running loses its.
@@ -866,6 +868,33 @@ impl Collection {
             })
             .collect();
         join::connect_activity(&mut joined, &mut activities, &native_rows, panes, cfg);
+        {
+            let mut history = self
+                .activity_history
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            history.observe(&activities, now);
+            for (key, activity) in &mut activities {
+                if let Some(bead) = history.beads().get(key) {
+                    for observation in &bead.observations {
+                        let worker = &observation.activity;
+                        let era = if worker.attempt_id == activity.attempt_id {
+                            "current attempt"
+                        } else {
+                            "earlier attempt"
+                        };
+                        activity.evidence.push(format!(
+                            "observed worker history: {} · task {} · {} · {} · first seen {}",
+                            era,
+                            worker.task_id.as_deref().unwrap_or("unknown"),
+                            worker.model_label().unwrap_or("unknown model"),
+                            worker.state_label(),
+                            observation.first_seen.to_rfc3339(),
+                        ));
+                    }
+                }
+            }
+        }
         for (project, _, read) in &drawn {
             if let Ok(assembled) = read {
                 joined.cover(project, assembled, now);

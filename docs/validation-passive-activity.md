@@ -389,3 +389,14 @@ fix all five focused runtime tests passed. All-target Clippy, formatting and
 available extracted source scans passed. Real terminal tests and a state matrix
 cover idle/live/active labels; Linux live JSON was checked separately. Nix,
 macOS and a newly reopened interactive Herdr pane were not exercised.
+
+## Worker evidence refinement (0.47.0)
+
+The full locked Cargo suite passed 2,844 tests (3 ignored) across 44 reported
+targets. Focused native transport, observed history and narrow-view tests passed;
+all-target Clippy, formatting and extracted repository scans passed. Tests use
+invented identities and synthetic protocol peers. The optional Linux native
+status transport has not yet been verified against a live authenticated host:
+the inspected host advertised a public authentication challenge but its key
+record was unavailable. Session headers and model-change metadata are used for
+identity, not conversational attribution. Nix and macOS were not available.
