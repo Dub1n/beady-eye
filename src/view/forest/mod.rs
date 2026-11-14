@@ -135,6 +135,7 @@ pub struct Forest {
     pinned_root: Option<BeadKey>,
     /// A selected bead that became closed during refresh remains visible until Home.
     preserve_completed: Option<BeadKey>,
+    reveal_selection: Option<BeadKey>,
 }
 
 /// Flatten a snapshot into its lines.
@@ -167,6 +168,7 @@ pub fn flatten(snapshot: Snapshot) -> Forest {
         show_completed: false,
         pinned_root: None,
         preserve_completed: None,
+        reveal_selection: None,
     };
     forest.lay_out();
     forest.select_first_root();
@@ -389,7 +391,10 @@ impl Forest {
         self.cursor = ancestry
             .into_iter()
             .map(|handle| match handle {
-                Handle::Bead(place) | Handle::Unread(place) => self.handle_on(&place),
+                Handle::Bead(place) | Handle::Unread(place) => {
+                    let place = self.rerooted(&place).unwrap_or(place);
+                    self.handle_on(&place)
+                }
                 other => other,
             })
             .find(|handle| self.present(handle));
@@ -397,6 +402,11 @@ impl Forest {
             self.cursor = Some(Handle::Bead(place));
         }
         self.lay_out();
+        if let Some(key) = self.reveal_selection.clone() {
+            if self.go_to(&key) {
+                self.reveal_selection = None;
+            }
+        }
     }
 
     /// Start focused on the beads the command line named, as Shift+F on each
@@ -703,6 +713,7 @@ impl Forest {
                 self.show_fixtures = false;
                 self.pinned_root = None;
                 self.preserve_completed = None;
+                self.reveal_selection = None;
                 self.layout.dependencies = false;
                 self.snapshot.refilter(Filter::CurrentWork);
                 self.answer();
@@ -807,6 +818,7 @@ impl Forest {
                 self.reveal();
                 return true;
             }
+            Action::RootUp => return self.root_up(),
             Action::RootSelected => {
                 self.root_selected();
                 true
@@ -853,7 +865,56 @@ impl Forest {
     ///
     /// Either way the beads the command line named and no collection has
     /// drawn yet are let go of: the reader has taken the mode in hand.
+    fn root_up(&mut self) -> bool {
+        let selected = self.place().map(|place| place.key().clone());
+        let Some(root) = self
+            .place()
+            .and_then(|place| self.focused_over(place))
+            .or_else(|| self.focused.first())
+            .cloned()
+        else {
+            return false;
+        };
+        let parent = root
+            .forebears()
+            .next()
+            .map(|place| place.key().clone())
+            .or_else(|| {
+                self.snapshot
+                    .node(root.key())
+                    .and_then(|node| node.parent.as_ref())
+                    .map(|parent| BeadKey {
+                        project: parent
+                            .project
+                            .clone()
+                            .unwrap_or_else(|| root.key().project.clone()),
+                        id: parent.id.clone(),
+                    })
+            });
+        let parent = parent.filter(|parent| parent != root.key());
+        self.list = None;
+        self.named.clear();
+        self.named_at_launch = false;
+        self.focused.clear();
+        self.reveal_selection = None;
+        if let Some(parent) = parent {
+            self.named.push(parent);
+            self.focus_the_named();
+        }
+        self.answer();
+        self.lay_out();
+        if let Some(key) = selected {
+            if self.named.is_empty() {
+                self.go_to(&key);
+            } else {
+                self.reveal_selection = Some(key);
+            }
+        }
+        true
+    }
+
     fn root_selected(&mut self) {
+        self.reveal_selection = None;
         let Some(key) = self.place().map(|place| place.key().clone()) else {
             return;
         };
@@ -870,6 +931,7 @@ impl Forest {
     }
 
     fn focus_forest(&mut self) {
+        self.reveal_selection = None;
         if self.list.is_some() {
             let Some(key) = self.place().map(|place| place.key().clone()) else {
                 return;
@@ -1097,6 +1159,7 @@ impl Forest {
     }
 
     fn next_scope(&mut self) {
+        self.reveal_selection = None;
         let next = match self.snapshot.filter {
             Filter::CurrentWork | Filter::LiveAgents => Filter::Activity,
             Filter::Activity => Filter::History,

@@ -79,5 +79,48 @@ fn graph_toggle_preserves_dependencies_and_space_and_control_space_have_distinct
         !rooted.iter().any(|row| row.contains("Release")),
         "Ctrl+Space/NUL scopes to the selected root: {rooted:?}"
     );
+    // Enter a lower root, then reveal exactly one containing level.
+    let child = app.send(b"\x1b[C\0");
+    app.answer_to(child, GIVING_UP);
+    let repaint = app.resize(27, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    let lower = terminal::rows_drawn(&screen);
+    assert!(
+        !lower.iter().any(|row| row.contains("Gateway")),
+        "{lower:?}"
+    );
+    let up = app.send(b"\x7f");
+    app.answer_to(up, GIVING_UP);
+    app.read_until(b"Gateway", GIVING_UP);
+    let repaint = app.resize(26, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    let parent = terminal::rows_drawn(&screen);
+    assert!(
+        parent.iter().any(|row| row.contains("Gateway")),
+        "{parent:?}"
+    );
+    assert!(
+        !parent.iter().any(|row| row.contains("Release")),
+        "Backspace reveals one level, not the entire forest: {parent:?}"
+    );
+    let details = app.send(b" ");
+    app.answer_to(details, GIVING_UP);
+    let repaint = app.resize(27, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    assert!(terminal::window_over(&screen).is_some());
+    let home = app.send(b"H");
+    app.answer_to(home, GIVING_UP);
+    let repaint = app.resize(26, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    assert!(
+        terminal::window_over(&screen).is_none(),
+        "H leaves details for Home"
+    );
+    assert!(
+        terminal::rows_drawn(&screen)
+            .iter()
+            .any(|row| row.contains("Release")),
+        "H restores the default forest"
+    );
     app.send(b"q");
 }

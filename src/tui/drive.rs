@@ -599,7 +599,10 @@ fn answered(
     let changed = match event {
         // Any key at all, because a reader who opened the bindings by
         // accident must not have to find the one key that closes them.
-        Event::Key(_) if *showing == Showing::Bindings => {
+        Event::Key(key) if *showing == Showing::Bindings => {
+            if action(key) == Some(Action::Home) {
+                view.apply(Action::Home);
+            }
             *showing = Showing::Forest;
             true
         }
@@ -615,6 +618,11 @@ fn answered(
         // up; the bindings go up over the forest, since the key that takes
         // them away lands there.
         Event::Key(key) if *showing == Showing::Bead => match action(key) {
+            Some(Action::Home) => {
+                *showing = Showing::Forest;
+                view.apply(Action::Home);
+                true
+            }
             Some(Action::Back) => {
                 if !view.retrace() {
                     *showing = Showing::Forest;
@@ -651,8 +659,8 @@ fn answered(
                 | Action::ToggleFixtures
                 | Action::ToggleDependencies
                 | Action::RootSelected
+                | Action::RootUp
                 | Action::ToggleCompleted
-                | Action::Home
                 | Action::NextScope
                 | Action::ToggleReadyList
                 | Action::NextView

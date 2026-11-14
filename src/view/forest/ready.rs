@@ -16,7 +16,7 @@ use crate::model::snapshot::{Counts, Node as Bead, Snapshot, TrackerState, Tree}
 use crate::model::tree::numeric_id_order;
 use crate::model::types::{Edge, Status};
 use crate::view::lines::{
-    links_below, marker_with, root_key, upward_prefix_with, Content, Line, Note, Place,
+    links_below, marker_with, root_key, upward_prefix_for_layout, Content, Line, Note, Place,
     ProjectLine, Section, Waiting, INDENT,
 };
 use crate::view::row::{self, Step};
@@ -379,13 +379,7 @@ impl<'a> Up<'a> {
                 unblocks_as_above: !first && !self.waiting_on(&stepped).is_empty(),
             });
             let line = Line {
-                prefix: upward_prefix_with(
-                    trunk,
-                    last,
-                    edge,
-                    self.layout.indent,
-                    self.layout.ascii,
-                ),
+                prefix: upward_prefix_for_layout(trunk, last, edge, self.layout),
                 depth: trunk.len() as u16 + 2,
                 folded: None,
                 place: self.place_of(&bead.key()),

@@ -191,8 +191,8 @@ pub struct Layout {
     /// What an open bead's id is drawn in. `bd` sends no colour for open, so
     /// the default leaves the id in the row's tone like the rest of the row.
     pub open_id: Colour,
-    /// Total columns per hierarchy level, including its connector (minimum one;
-    /// nominal compact default two).
+    /// Connector width (minimum one; nominal compact default two). Compact
+    /// descendants add one alignment cell so trunks meet the marker's centre.
     #[serde(default = "default_indent")]
     pub indent: u8,
     /// Use ASCII connector characters where the terminal cannot draw box lines.

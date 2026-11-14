@@ -108,7 +108,8 @@ beads. Isolating future tests in a disposable tracker is separate maintenance.
 - Left: collapse an expanded branch; otherwise select its parent.
 - Ctrl+Space: set the selected root separately and idempotently. F retains the
   existing focus/restore action; Home restores the default ownership forest.
-- Home: restore the default ownership forest containing unfinished work.
+- Home or H: restore the default ownership forest containing unfinished work.
+- Backspace: reveal the parent root level while retaining selected bead and filters.
 - Space and Enter: open bead details, with the same follow/focus action in details.
 - Keep the ready/unblocking view and dependency relations available. Use a
   separate dependency graph rather than duplicating shared blockers in the

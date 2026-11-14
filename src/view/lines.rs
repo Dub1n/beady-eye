@@ -364,6 +364,7 @@ pub(crate) fn prefix(trunk: &[bool], last: bool, shut: bool, edge: Option<&Edge>
 }
 
 /// `prefix` with the row layout's total per-level width and connector style.
+#[cfg(test)]
 pub(crate) fn prefix_with(
     trunk: &[bool],
     last: bool,
@@ -379,11 +380,13 @@ pub(crate) fn prefix_with(
         shut.then_some(SHUT_IN_THE_ARM),
         indent,
         ascii,
+        false,
     )
 }
 
 /// `prefix` for a line the ready list hangs under the bead it waits on: the
 /// same connectors, with the arm ending in an arrow up.
+#[cfg(test)]
 pub(crate) fn upward_prefix_with(
     trunk: &[bool],
     last: bool,
@@ -391,7 +394,51 @@ pub(crate) fn upward_prefix_with(
     indent: u8,
     ascii: bool,
 ) -> String {
-    elbow(trunk, last, Some(edge), Some(UP_THE_ARM), indent, ascii)
+    elbow(
+        trunk,
+        last,
+        Some(edge),
+        Some(UP_THE_ARM),
+        indent,
+        ascii,
+        false,
+    )
+}
+
+/// Compact descendants descend from the centre of the parent's bracket marker.
+pub(crate) fn prefix_for_layout(
+    trunk: &[bool],
+    last: bool,
+    shut: bool,
+    edge: Option<&Edge>,
+    layout: &crate::view::row::Layout,
+) -> String {
+    elbow(
+        trunk,
+        last,
+        edge,
+        shut.then_some(SHUT_IN_THE_ARM),
+        layout.indent,
+        layout.ascii,
+        layout.compact,
+    )
+}
+
+pub(crate) fn upward_prefix_for_layout(
+    trunk: &[bool],
+    last: bool,
+    edge: &Edge,
+    layout: &crate::view::row::Layout,
+) -> String {
+    elbow(
+        trunk,
+        last,
+        Some(edge),
+        Some(UP_THE_ARM),
+        layout.indent,
+        layout.ascii,
+        layout.compact,
+    )
 }
 
 fn elbow(
@@ -401,6 +448,7 @@ fn elbow(
     end: Option<char>,
     indent: u8,
     ascii: bool,
+    centred: bool,
 ) -> String {
     let indent = usize::from(indent.max(1));
     let mut drawn = String::from(INDENT);
@@ -409,12 +457,13 @@ fn elbow(
     } else {
         ('│', '├', '└', '─', '┄')
     };
+    let step = indent + usize::from(centred);
     for more in trunk {
         if *more {
             drawn.push(trunk_char);
-            drawn.push_str(&" ".repeat(indent - 1));
+            drawn.push_str(&" ".repeat(step - 1));
         } else {
-            drawn.push_str(&" ".repeat(indent));
+            drawn.push_str(&" ".repeat(step));
         }
     }
     let arm = match edge {

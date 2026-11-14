@@ -290,7 +290,13 @@ pub(super) const BINDINGS: &[Binding] = &[
         hint: None,
     },
     Binding {
-        keys: &[alone(KeyCode::Home, "Home")],
+        keys: &[alone(KeyCode::Backspace, "BkSp")],
+        action: Action::RootUp,
+        does: "reveal the displayed root's parent level",
+        hint: None,
+    },
+    Binding {
+        keys: &[alone(KeyCode::Home, "Home"), alone(KeyCode::Char('H'), "H")],
         action: Action::Home,
         does: "restore the default current-work forest",
         hint: None,
@@ -609,6 +615,7 @@ pub(super) mod tests {
             Action::ToggleFixtures,
             Action::ToggleDependencies,
             Action::RootSelected,
+            Action::RootUp,
             Action::ToggleReadyList,
             Action::NextView,
             Action::NextScope,
@@ -654,6 +661,7 @@ pub(super) mod tests {
                 | Action::ToggleFixtures
                 | Action::ToggleDependencies
                 | Action::RootSelected
+                | Action::RootUp
                 | Action::ToggleReadyList
                 | Action::NextView
                 | Action::NextScope
@@ -915,6 +923,8 @@ pub(super) mod tests {
             (key(KeyCode::Esc), Action::Back),
             (key(KeyCode::Char('y')), Action::CopyId),
             (key(KeyCode::Home), Action::Home),
+            (key(KeyCode::Char('H')), Action::Home),
+            (key(KeyCode::Backspace), Action::RootUp),
             (key(KeyCode::Char('g')), Action::Move(Motion::FirstRow)),
             (key(KeyCode::Char('a')), Action::ToggleFilter),
             (key(KeyCode::Char('z')), Action::ToggleCompleted),
