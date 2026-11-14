@@ -284,3 +284,19 @@ The full Cargo suite passed: 2,799 tests, zero failures and 3 ignored across 44
 reported targets. Clippy with warnings denied (production and all targets),
 formatting, all three extracted upstream source scans and clean Cargo package
 verification passed. The canonical release installation reports 0.44.0 and matches the release binary byte for byte.
+
+## 0.44.1 fold-hint placement
+
+Nested collapsed beads retain their branch arrows. Only branchless beads use a
+hint directly after the status (`[ ]▸ Title`, ASCII `[ ]> Title`). The hint uses
+one existing separator cell, keeping the title and its link coordinates aligned
+with expanded rows, without changing tracker data or group/project disclosures.
+Rendering regressions cover both connector alphabets, nested connector widths
+2/3/4, hidden project indentation, and matching expanded/collapsed title columns.
+Existing fitting, hyperlink and legacy rendering tests remain in scope because
+separator measurement is shared.
+
+All 2,800 Cargo tests passed (3 ignored, 44 reported targets). Formatting,
+production/all-target Clippy with warnings denied, and the three extracted
+upstream source scans passed. The canonical installed binary reports 0.44.1.
+Nix/macOS and a fresh live Herdr pane were not exercised; no pane was restarted.

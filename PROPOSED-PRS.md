@@ -237,8 +237,9 @@ connector widths and expanded/collapsed groups, including global-group children.
 Keep model paths, source snapshots and click row geometry unchanged.
 
 **0.44.0 follow-up to proposal 3:** Compact group/project disclosures move onto
-the vertical column; collapsed beads put their arrow after the marker, including
-roots whose project indentation is hidden. Keep this separate from indentation
+the vertical column. As refined in 0.44.1, nested collapsed beads retain their
+branch arrows; only branchless beads put an arrow directly after the status,
+using an existing separator cell so title and link geometry remain unchanged. Keep this separate from indentation
 configuration if upstream prefers its existing elbows. Preserve default geometry
 upstream and test ASCII, hidden roots, expanded/collapsed alignment and click rows.
 

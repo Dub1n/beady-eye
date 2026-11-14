@@ -439,14 +439,12 @@ pub(super) fn fitted(
         Content::Unread(unread) => unread_line(unread, &prefix, widths.of(&Cell::Id)),
         Content::Absent(absent) => absent_line(absent, &prefix, widths.of(&Cell::Id)),
         Content::Bead(row) | Content::Waiting(Waiting { row, .. }) => {
-            if layout.compact && line.folded == Some(false) {
-                let mut row = row.clone();
-                let arrow = if layout.ascii { ">" } else { "▸" };
-                row.title = format!("{arrow} {}", row.title);
-                let prefix = prefix.replace('▸', "─").replace('>', "-");
-                bead_line(&row, &prefix, widths, layout)
+            let fitted = bead_line(row, &prefix, widths, layout);
+            if layout.compact && line.folded == Some(false) && !prefix.contains(['├', '└', '+'])
+            {
+                fitted.fold_hint(if layout.ascii { '>' } else { '▸' })
             } else {
-                bead_line(row, &prefix, widths, layout)
+                fitted
             }
         }
         Content::Elided { count, .. } => elided_run(&prefix, *count),
@@ -1503,10 +1501,7 @@ mod compact_controls {
             .rows()
             .remove(0);
             assert!(
-                closed.starts_with("[~]")
-                    && closed[3..]
-                        .trim_start()
-                        .starts_with(if ascii { "> " } else { "▸ " }),
+                closed.starts_with(if ascii { "[~]> " } else { "[~]▸ " }),
                 "{closed}"
             );
             line.folded = Some(true);
@@ -1518,6 +1513,11 @@ mod compact_controls {
             .rows()
             .remove(0);
             assert!(open.starts_with("[~] "));
+            assert_eq!(
+                closed.find("lift").map(|at| closed[..at].chars().count()),
+                open.find("lift").map(|at| open[..at].chars().count()),
+                "titles stay aligned"
+            );
             assert!(!open.contains(if ascii { ">" } else { "▸" }));
             let project = forest.lines().viewport(0, 1).next().unwrap().1;
             let heading = Painted::of(
@@ -1531,6 +1531,44 @@ mod compact_controls {
                 heading.starts_with(if ascii { " v " } else { " ▾ " }),
                 "{heading}"
             );
+        }
+    }
+
+    #[test]
+    fn nested_collapsed_beads_keep_their_branch_arrow_and_title_column() {
+        for ascii in [false, true] {
+            for indent in [2, 3, 4] {
+                let mut forest = forest();
+                let layout = Layout {
+                    ascii,
+                    indent,
+                    ..Layout::default()
+                };
+                forest.laid_out_to(layout.clone());
+                let mut line = forest.lines().viewport(1, 1).next().unwrap().1.clone();
+                let mut rows = Vec::new();
+                for open in [false, true] {
+                    line.folded = Some(open);
+                    line.prefix = lines::prefix_for_layout(&[], false, !open, None, &layout);
+                    rows.push(
+                        Painted::of(
+                            fitted(&line, forest.lines().widths(), &layout, &at_rest()),
+                            80,
+                            1,
+                        )
+                        .rows()
+                        .remove(0),
+                    );
+                }
+                let arrow = if ascii { '>' } else { '▸' };
+                assert!(
+                    rows[0].find(arrow).unwrap() < rows[0].find('[').unwrap(),
+                    "{}",
+                    rows[0]
+                );
+                assert!(!rows[1].contains(arrow));
+                assert_eq!(rows[0].find("lift"), rows[1].find("lift"));
+            }
         }
     }
 

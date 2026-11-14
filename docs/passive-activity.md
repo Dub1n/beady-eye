@@ -415,9 +415,10 @@ loaded beads use their current snapshot state; missing references remain explici
 Legacy detail rendering remains available with the legacy row layout.
 
 Group disclosure arrows and project headings align with the compact tree
-verticals. A collapsed bead carries its arrow immediately after the status's
-normal separator (`[ ] ▸ title`, or `[ ] > title` in ASCII); opening it removes
-the hint without adding a left-side column. Selecting hidden completed work does
+verticals. Nested collapsed beads keep their arrow in the horizontal branch.
+Only beads without a horizontal branch use `[ ]▸ Title` (`[ ]> Title` in ASCII).
+The arrow occupies an existing separator cell, keeping titles in the same column
+as expanded beads; opening the bead removes the hint. Selecting hidden completed work does
 not promote its tree into the main section on refresh. Explicit rooting remains
 available. Preview rows ignore trailing blank capture padding when deciding
 whether content was truncated; genuine clipped text still carries an ellipsis.
