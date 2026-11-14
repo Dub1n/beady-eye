@@ -1612,6 +1612,24 @@ path = "/home/user/dev/kadath"
 "#;
 
     #[test]
+    fn status_brackets_default_to_status_colour_and_can_inherit_normal_text() {
+        assert!(Config::from_toml(ONE_PROJECT).unwrap().row.colour_brackets);
+        assert!(
+            !Config::from_toml(&format!("{ONE_PROJECT}[row]\ncolour_brackets=false\n"))
+                .unwrap()
+                .row
+                .colour_brackets
+        );
+        assert!(
+            Config::from_toml(&format!("{ONE_PROJECT}[row]\ncolour_brackets=true\n"))
+                .unwrap()
+                .row
+                .colour_brackets
+        );
+        assert!(Config::from_toml(&format!("{ONE_PROJECT}[row]\ncolour_brackets='no'\n")).is_err());
+    }
+
+    #[test]
     fn parses_every_section() {
         let cfg = Config::from_toml(EVERY_SECTION).expect("parses");
 

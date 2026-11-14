@@ -70,9 +70,14 @@ pub(super) fn bead_line(row: &Row, prefix: &str, widths: &Widths, layout: &Layou
         layout,
         widths,
     };
+    let prefix = if layout.compact && layout.identity.first() == Some(&Cell::Glyph) {
+        connected_prefix(prefix, layout.ascii)
+    } else {
+        prefix.to_string()
+    };
     let identity = walk.block(
         Block::Identity,
-        vec![structure(prefix)],
+        vec![structure(&prefix)],
         row.agent.as_deref(),
     );
     let title = walk.block(Block::Title, Vec::new(), row.agent.as_deref());
@@ -122,6 +127,32 @@ struct Walk<'a> {
     row: &'a Row,
     layout: &'a Layout,
     widths: &'a Widths,
+}
+
+/// Connect a compact branch directly to its status without changing its width.
+/// Keep the fold arrow at the end; intermediate levels keep their normal gaps.
+fn connected_prefix(prefix: &str, ascii: bool) -> String {
+    if !prefix.ends_with(' ') || !prefix.contains(['├', '└', '+']) {
+        return prefix.to_string();
+    }
+    let mut connected = prefix.to_string();
+    connected.pop();
+    let end = connected.chars().last();
+    let arm = if ascii {
+        '-'
+    } else if prefix.contains('┄') {
+        '┄'
+    } else {
+        '─'
+    };
+    if end.is_some_and(|end| ['▸', '↑', '>', '^'].contains(&end)) {
+        connected.pop();
+        connected.push(arm);
+        connected.push(end.unwrap());
+    } else {
+        connected.push(arm);
+    }
+    connected
 }
 
 /// One block of a row as the walk filled it: its spans, and which of them
@@ -195,14 +226,21 @@ impl Walk<'_> {
         let row = self.row;
         match cell {
             Cell::Glyph => {
-                walked.cell(Span::styled(
-                    if self.layout.compact || self.layout.ascii {
-                        row::appearance::marker(&row.status, row.activity.as_ref()).to_string()
+                let style = status_style(&row.status);
+                if self.layout.compact || self.layout.ascii {
+                    let marker = row::appearance::marker(&row.status, row.activity.as_ref());
+                    if self.layout.colour_brackets {
+                        walked.cell(Span::styled(marker.to_string(), style));
                     } else {
-                        row.glyph.to_string()
-                    },
-                    status_style(&row.status),
-                ));
+                        walked.cell(Span::raw("["));
+                        walked
+                            .spans
+                            .push(Span::styled(marker[1..2].to_string(), style));
+                        walked.spans.push(Span::raw("]"));
+                    }
+                } else {
+                    walked.cell(Span::styled(row.glyph.to_string(), style));
+                }
             }
             Cell::Id => {
                 if !self.layout.show_ids {
@@ -452,6 +490,74 @@ mod tests {
     use crate::view::draw::tone::status_style;
     use crate::view::draw::{fitted, tests::*};
     use crate::view::painted::{self, Run};
+
+    #[test]
+    fn compact_branches_touch_markers_without_changing_fold_alignment() {
+        for ascii in [false, true] {
+            for indent in [1, 2, 3, 4] {
+                let mut columns = Vec::new();
+                for folded in [false, true] {
+                    let layout = Layout {
+                        ascii,
+                        indent,
+                        ..Layout::default()
+                    };
+                    let prefix = crate::view::lines::prefix_with(
+                        &[true],
+                        false,
+                        folded,
+                        None,
+                        indent,
+                        ascii,
+                    );
+                    let row = row(&node("ark-1", "Example", Status::InProgress));
+                    let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 1));
+                    bead_line(&row, &prefix, &Widths::default(), &layout)
+                        .render(buffer.area, &mut buffer);
+                    let at = (0..40).find(|x| buffer[(*x, 0)].symbol() == "[").unwrap();
+                    assert_ne!(buffer[(at - 1, 0)].symbol(), " ", "{prefix:?}");
+                    columns.push(at);
+                }
+                assert_eq!(columns[0], columns[1], "indent {indent}, ascii {ascii}");
+            }
+        }
+    }
+
+    #[test]
+    fn bracket_colour_is_independent_of_the_status_character_and_selection() {
+        for status in [Status::InProgress, Status::Blocked, Status::Closed] {
+            for colour_brackets in [false, true] {
+                for selected in [false, true] {
+                    let layout = Layout {
+                        colour_brackets,
+                        ..Layout::default()
+                    };
+                    let row = row(&node("ark-1", "Example", status.clone()));
+                    let mut drawn = bead_line(&row, "  ├ ", &Widths::default(), &layout);
+                    if selected {
+                        drawn = drawn.selected();
+                    }
+                    let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 1));
+                    drawn.render(buffer.area, &mut buffer);
+                    let at = (0..40).find(|x| buffer[(*x, 0)].symbol() == "[").unwrap();
+                    let title = (at + 3..40)
+                        .find(|x| buffer[(*x, 0)].symbol() == "E")
+                        .unwrap();
+                    let status_colour = status_style(&status).fg.unwrap();
+                    assert_eq!(buffer[(at + 1, 0)].fg, status_colour);
+                    let expected = if colour_brackets {
+                        status_colour
+                    } else {
+                        buffer[(title, 0)].fg
+                    };
+                    assert_eq!(buffer[(at, 0)].fg, expected);
+                    assert_eq!(buffer[(at + 2, 0)].fg, expected);
+                    assert_eq!(buffer[(at, 0)].bg, buffer[(at + 1, 0)].bg);
+                    assert_eq!(buffer[(at, 0)].bg, buffer[(at + 2, 0)].bg);
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_bead_line_says_its_glyph_its_id_and_its_title_in_that_order() {

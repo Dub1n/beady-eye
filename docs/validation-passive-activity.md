@@ -135,3 +135,16 @@ formatting, diff checks, extracted source scans, package verification and releas
 build. Installed `bin/bdi` reports 0.42.0 and matches the canonical release binary.
 This follow-up uses invented collection and real PTY evidence; it does not claim
 fresh live Herdr-pane, macOS or full Nix validation.
+
+## 0.42.1 connected markers and bracket colours
+
+Compact branch connectors touch the status marker without changing indentation
+width. Fold arrows remain at the end of the connector and open/collapsed rows
+keep their alignment. The default `[row] colour_brackets = true` keeps the status
+colour on all three marker characters. With `false`, brackets inherit normal row
+text colour while the centre retains status colour. Renderer tests check both
+settings and selection highlighting, plus ASCII/Unicode branches at indent 1–4.
+The real terminal test checks both settings at 30/40/60/80 columns, including
+status descriptions, details and copying. No tracker or workflow changes are made.
+
+Full Cargo validation: 2,768 passed, zero failed, 3 ignored across 44 reported targets. Both Clippy modes, formatting, source scans, package verification and release build passed. The installed binary reports 0.42.1 and matches the canonical release build; no fresh live Herdr-pane or macOS/Nix coverage is claimed.
