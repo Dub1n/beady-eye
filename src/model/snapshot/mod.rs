@@ -248,6 +248,7 @@ pub struct Readiness {
 pub struct Counts {
     pub total: usize,
     pub finished: usize,
+    /// Distinct primary live panes plus native active work without a pane.
     pub live_agents: usize,
     /// Beads carrying at least one anomaly, not rules fired. Every other count
     /// here counts beads, and a header's warning count sends a reader looking
@@ -281,13 +282,18 @@ impl Counts {
             finished: once.iter().filter(|n| n.status.is_finished()).count(),
             live_agents: once
                 .iter()
-                .filter(|n| {
-                    n.agent.is_some()
-                        || n.activity
-                            .as_ref()
-                            .is_some_and(|a| a.state == crate::collect::omo::ActivityState::Working)
-                })
-                .count(),
+                .filter_map(|n| n.agent.as_ref().map(|a| &a.pane))
+                .collect::<BTreeSet<_>>()
+                .len()
+                + once
+                    .iter()
+                    .filter(|n| {
+                        n.agent.is_none()
+                            && n.activity.as_ref().is_some_and(|a| {
+                                a.state == crate::collect::omo::ActivityState::Working
+                            })
+                    })
+                    .count(),
             anomalies: once
                 .iter()
                 .filter(|n| {

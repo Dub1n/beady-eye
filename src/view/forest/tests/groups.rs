@@ -62,6 +62,7 @@ fn an_empty_group_draws_nothing() {
         &[],
         &Joined {
             agents: joined.agents,
+            linked_panes: BTreeSet::new(),
             refused: BTreeMap::new(),
             out_of_reach: BTreeSet::new(),
             under_a_seat: BTreeSet::new(),

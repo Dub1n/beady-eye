@@ -624,6 +624,25 @@ fn said_styled(
     if let Some(agent) = &cells.agent {
         rows.push(indented(vec![Span::styled(agent.clone(), palette::AGENT)]));
     }
+    if let Some(agent) = &node.agent {
+        if matches!(
+            agent.source,
+            crate::model::join::JoinSource::NativeWorker
+                | crate::model::join::JoinSource::NativeCoordinator
+        ) {
+            rows.push(indented(vec![Span::raw(format!(
+                "Pane: {}/{} · Agent session: {} · Link: {}",
+                agent.pane.session,
+                agent.pane.id,
+                agent.agent_session.as_deref().unwrap_or("unknown"),
+                if agent.source == crate::model::join::JoinSource::NativeCoordinator {
+                    "live coordinator"
+                } else {
+                    "live worker/direct owner"
+                }
+            ))]));
+        }
+    }
     if let Some(activity) = &node.activity {
         rows.push(Vec::new());
         rows.push(vec![Span::styled(

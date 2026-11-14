@@ -526,6 +526,21 @@ keep paths/metadata/model aliases adapter-owned, and retain invented missing,
 ambiguous, partial, stale, budget, shared-owner and file-replacement tests. No
 agent reporting steps or tracker writes are introduced.
 
+**0.45.0 follow-up to proposal 9:** Current native session associations are joined
+before snapshot construction from validated project rows, independently of
+across-project dependency assembly, supporting many beads per owner and separate
+worker/direct versus coordinator roles. Linked beads expose preview/focus and
+full pane/session provenance; matched panes leave unclaimed diagnostics. Compact
+live indicators survive model-label precedence and primary pane counts deduplicate.
+Source pointers: `src/model/join/activity.rs`, collection ordering and row/details
+rendering. Keep this fork-specific until an upstream provider/association contract
+is agreed. Extract normalized roles and ambiguity/conflict handling without
+hardcoding workflow metadata or direct/delegate strings into upstream core.
+Test missing/old/cross-project/ambiguous sessions, completed native records with a
+live coordinator, explicit join disagreement, shared ownership, terminal removal,
+counts, primary preview selection and narrow-width live indicators. Do not infer
+per-bead execution from a coordinator's terminal status. Complete the shared gate.
+
 ## 10. Portable missing-program test environments
 
 **Priority:** optional small test-only proposal; low product-diff reduction.
@@ -645,6 +660,28 @@ do not bundle mouse changes or provider logic. Test open and closed descendants,
 completed visibility toggles, reopening, focused roots, cached/lazy row counts and
 refresh. Complete the shared contribution gate before proposing it upstream.
 
+
+## 15. Recover missing OmO pane session IDs from exact foreground argv
+
+**Tentative title:** `feat(collect): recover missing native agent session ids`
+
+Herdr can report a live OmO agent without an `agent_session` field even while its
+foreground process argv explicitly names the session. The fork uses a bounded,
+session-scoped, read-only process query as a fallback. Existing reported IDs win.
+Only an identified application, matching pane/directory, one foreground executable
+and one safe explicit ID qualify; captions and free-text command lines do not.
+
+**To become independent and merge-ready:** Ask upstream whether identity belongs
+in Herdr's native report first; that could avoid maintaining a second collector.
+If a bdi fallback is wanted, isolate `src/collect/herdr.rs` plus the provider app
+token field, preserve failure degradation and quantify per-collection subprocess
+cost. This fallback can stand apart from proposal 9 because it also supplies
+existing session-key joins; it does not itself remove their exclusive-claim
+rules. Test canonical identity precedence, app/session/pane/CWD mismatch, duplicate
+arguments, session-file paths, malformed/unsupported answers and the 32-lookup
+bound. Do not introduce writeback hooks or change a running agent's session.
+Use invented examples, update terminology/source provenance as agreed and finish
+the shared contribution gate against fresh upstream.
 
 ## Recommended extraction order and maintenance strategy
 

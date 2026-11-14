@@ -124,6 +124,11 @@ impl Activity {
         self.effective_model.as_deref().map(short_model)
     }
 
+    /// The coordinator model independently of a delegated worker's model.
+    pub fn coordinator_model_label(&self) -> Option<&str> {
+        self.coordinator_model.as_deref().map(short_model)
+    }
+
     /// Known worker model, or an explicitly labelled coordinator owner.
     pub fn owner_label(&self) -> Option<String> {
         self.model_label()

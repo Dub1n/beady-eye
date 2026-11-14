@@ -275,7 +275,7 @@ pub struct PaneKey {
     pub id: String,
 }
 
-/// The agent session herdr reports for a pane's agent, as herdr spells it.
+/// The agent session reported or resolved from the provider's exact evidence.
 /// `kind` says what `value` is, so a reader matches on the kind it uses and
 /// leaves a session of any other kind alone.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -301,6 +301,8 @@ pub struct Pane {
     /// name for it. `bdi` never reads anything into the name: it is the key
     /// the reader's `[tail.crop]` is written against.
     pub agent: Option<String>,
+    /// Application identity reported in the provider's runtime tokens.
+    pub app: Option<String>,
     pub agent_session: Option<AgentSession>,
     pub display_agent: Option<String>,
     pub title: Option<String>,
@@ -327,6 +329,7 @@ impl Pane {
             pane_id,
             cwd,
             agent: None,
+            app: None,
             agent_session: None,
             display_agent: None,
             title: None,

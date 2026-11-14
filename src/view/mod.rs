@@ -583,7 +583,9 @@ mod tests {
         std::iter::successors(Some(JoinSource::AgentSession), |source| match source {
             JoinSource::AgentSession => Some(JoinSource::AgentPane),
             JoinSource::AgentPane => Some(JoinSource::DisplayAgent),
-            JoinSource::DisplayAgent => None,
+            JoinSource::DisplayAgent => Some(JoinSource::NativeWorker),
+            JoinSource::NativeWorker => Some(JoinSource::NativeCoordinator),
+            JoinSource::NativeCoordinator => None,
         })
     }
 

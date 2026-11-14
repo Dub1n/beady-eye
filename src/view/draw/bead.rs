@@ -300,6 +300,23 @@ impl Walk<'_> {
                     } else {
                         label.to_string()
                     };
+                    let label = if self.layout.compact && row.activity_model.is_some() {
+                        if let Some(state) = &row.live_agent_state {
+                            let marker = if self.layout.ascii { "@" } else { "◍" };
+                            let role = if state.starts_with("coord ") {
+                                "coord "
+                            } else if state.starts_with("worker ") {
+                                "worker "
+                            } else {
+                                ""
+                            };
+                            format!("{marker} {role}{label}")
+                        } else {
+                            label
+                        }
+                    } else {
+                        label
+                    };
                     let at = walked.cell(Span::styled(label, palette::AGENT));
                     // In the state the short form is the whole block's
                     // `briefly`; anywhere else it is this span's own.
@@ -317,7 +334,30 @@ impl Walk<'_> {
                         }
                     }
                 }
-                if self.layout.compact && row.activity_state.as_deref() == Some("Activity unknown")
+                if self.layout.compact {
+                    if let Some(state) = &row.live_agent_state {
+                        // A model must not hide the live pane/worker signal.
+                        if row.activity_model.is_some() || agent.is_none() {
+                            let marker = if self.layout.ascii { "@" } else { "◍" };
+                            let state = state
+                                .strip_prefix("coord ")
+                                .or_else(|| state.strip_prefix("worker "))
+                                .unwrap_or(state);
+                            let text = if row.activity_model.is_some() {
+                                format!("· {state}")
+                            } else {
+                                format!(
+                                    "{}{marker} {state}",
+                                    if label.is_some() { "· " } else { "" }
+                                )
+                            };
+                            walked.cell(Span::styled(text, palette::AGENT));
+                        }
+                    }
+                }
+                if self.layout.compact
+                    && row.live_agent_state.is_none()
+                    && row.activity_state.as_deref() == Some("Activity unknown")
                 {
                     walked.cell(Span::styled(
                         if label.is_some() { "· ?" } else { "?" },

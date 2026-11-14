@@ -787,12 +787,6 @@ impl Collection {
             },
             rooted,
         );
-        for (project, _, read) in &drawn {
-            if let Ok(assembled) = read {
-                joined.cover(project, assembled, now);
-            }
-        }
-        let joined = &joined;
 
         let watching: BTreeMap<&str, BTreeMap<String, Watchers>> = answered
             .iter()
@@ -851,6 +845,22 @@ impl Collection {
             }
         }
         drop(readers);
+        // Native ownership belongs to the validated project source rows,
+        // independently of whether a displayed tree was assembled across projects.
+        let native_rows: Vec<_> = answered
+            .iter()
+            .map(|(project, work)| ProjectRows {
+                project,
+                rows: &work.beads,
+            })
+            .collect();
+        join::connect_activity(&mut joined, &mut activities, &native_rows, panes, cfg);
+        for (project, _, read) in &drawn {
+            if let Ok(assembled) = read {
+                joined.cover(project, assembled, now);
+            }
+        }
+        let joined = &joined;
         let trees = focused
             .iter()
             .map(|(project, root, read)| match read {

@@ -124,3 +124,134 @@ fn native_completion_refines_open_work_without_closing_it_or_claiming_a_pane() {
         ActivityState::Failed
     );
 }
+
+#[test]
+fn native_live_owners_join_before_snapshot_build_and_link_bead_preview_without_exclusive_claims() {
+    use beady_eye::collect::agents::testing::Fake as Agents;
+    use beady_eye::model::{
+        join::JoinSource,
+        snapshot::Counts,
+        types::{AgentSession, Pane, PaneStatus},
+    };
+    let ground = Ground(std::env::temp_dir().join(format!(
+        "bdi-live-native-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )));
+    std::fs::create_dir_all(&ground.0).unwrap();
+    let mut cfg =
+        Config::from_toml("[[projects]]\nname='arkham'\npath='/srv/work/arkham'\n[[projects]]\nname='dunwich'\npath='/srv/work/dunwich'\n").unwrap();
+    cfg.omo.insert(
+        "arkham".into(),
+        OmoConfig {
+            task_directory: ground.0.join("tasks"),
+            session_directory: Some(ground.0.clone()),
+            ..OmoConfig::default()
+        },
+    );
+    std::fs::write(
+        ground.0.join("invented_owner-a.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"type":"session","version":3,"id":"owner-a"}),
+            serde_json::json!({"type":"model_change","provider":"invented","modelId":"model-a"})
+        ),
+    )
+    .unwrap();
+    let source = serde_json::json!([
+        {"id":"ark-1","title":"Gateway","status":"in_progress","dependencies":[{"depends_on_id":"dunwich:dun-1","type":"blocks"}],"metadata":{"qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"direct"}}}},
+        {"id":"ark-2","title":"Search","status":"in_progress","metadata":{"qrclipWork":{"attempt":{"id":"attempt-b","coordinator":"owner-a","mode":"delegate"}}}}
+    ]);
+    let trackers = Fakes::default().with(
+        "arkham",
+        Fake::holding(parse_beads(&source.to_string()).unwrap()),
+    );
+    let trackers = trackers.with(
+        "dunwich",
+        Fake::holding(
+            parse_beads(r#"[{"id":"dun-1","title":"Shared contract","status":"closed"}]"#).unwrap(),
+        ),
+    );
+    let mut pane = Pane::answered(
+        "default".into(),
+        "w:p1".into(),
+        "/srv/work/arkham".into(),
+        PaneStatus::Working,
+    );
+    pane.agent = Some("pi".into());
+    pane.agent_session = Some(AgentSession {
+        agent: "pi".into(),
+        kind: "id".into(),
+        source: "invented".into(),
+        value: "owner-a".into(),
+    });
+    let agents = Agents::holding(vec![pane]);
+    let mut collection = beady_eye::app::Collection::default();
+    let snapshot = collection.collect(
+        &cfg,
+        &agents,
+        &trackers,
+        &beady_eye::app::Wanted::Everything,
+        Filter::CurrentWork,
+        Utc::now(),
+    );
+    let nodes: Vec<_> = snapshot
+        .collected
+        .iter()
+        .flat_map(|tree| &tree.beads)
+        .filter(|node| node.project == "arkham")
+        .collect();
+    assert_eq!(nodes.len(), 2);
+    assert!(snapshot.unattributed.is_empty());
+    assert_eq!(Counts::over(nodes.iter().copied()).live_agents, 1);
+    let mut forest = beady_eye::view::forest::flatten(snapshot.clone());
+    for node in nodes {
+        assert_eq!(
+            node.activity.as_ref().unwrap().state,
+            ActivityState::Unknown
+        );
+        let agent = node.agent.as_ref().unwrap();
+        assert_eq!(agent.pane.id, "w:p1");
+        assert_eq!(
+            agent.source,
+            if node.id == "ark-1" {
+                JoinSource::NativeWorker
+            } else {
+                JoinSource::NativeCoordinator
+            }
+        );
+        let row = beady_eye::view::row::cells(node, None, None, None);
+        assert_eq!(row.activity_model.as_deref(), Some("model-a"));
+        assert_eq!(
+            row.live_agent_state.as_deref(),
+            Some(if node.id == "ark-1" {
+                "working"
+            } else {
+                "coord working"
+            })
+        );
+        forest.go_to(&node.key());
+        assert_eq!(
+            beady_eye::view::tail::target(&forest).pane(),
+            Some(&agent.pane)
+        );
+        let detail = beady_eye::view::show::said(node, &[], None, 80, 40, &|_| false);
+        let text = detail
+            .rows
+            .iter()
+            .flat_map(|r| r.iter().map(|s| s.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            text.contains("Pane: default/w:p1") && text.contains("Agent session: owner-a"),
+            "{text}"
+        );
+    }
+    // A missing terminal on the next collection must remove liveness, not cache it.
+    let next = collection.redraw(&cfg, &Unasked, &trackers, Filter::CurrentWork, Utc::now());
+    assert!(next
+        .collected
+        .iter()
+        .flat_map(|tree| &tree.beads)
+        .all(|node| node.agent.is_none()));
+}

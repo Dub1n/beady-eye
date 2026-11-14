@@ -1,8 +1,8 @@
 //! herdr's command line as the way to the panes on this machine.
 //!
 //! The one module that spells `herdr session …` or `herdr agent …`, or reads
-//! their envelopes. Each question the seam asks is one herdr invocation,
-//! answered in herdr's own JSON and parsed here and nowhere else.
+//! their envelopes. Listings may use a bounded read-only foreground-process
+//! fallback for missing native session identity; every response is parsed here.
 //!
 //! A box runs several sessions at once, each its own server with its own
 //! socket, and `herdr agent list` answers for one of them: the one named on
@@ -78,6 +78,8 @@ struct Agent {
     #[serde(default)]
     state_labels: BTreeMap<String, String>,
     agent_status: PaneStatus,
+    #[serde(default)]
+    tokens: BTreeMap<String, serde_json::Value>,
 }
 
 impl Agent {
@@ -91,6 +93,11 @@ impl Agent {
             self.cwd,
             self.agent_status,
         );
+        pane.app = self
+            .tokens
+            .get("app")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
         pane.agent = self.agent;
         pane.agent_session = self.agent_session;
         pane.display_agent = self.display_agent;
@@ -168,7 +175,118 @@ fn agent_list(runner: &dyn Runner, session: &str) -> Result<Vec<Pane>, RunFailur
         None,
         &Env::new(),
     )?;
-    parse_agent_list(session, &out).map_err(|e| RunFailure::parse("herdr", e).reading("agent list"))
+    let mut panes = parse_agent_list(session, &out)
+        .map_err(|e| RunFailure::parse("herdr", e).reading("agent list"))?;
+    // Native argv is an exact fallback, never a title/caption heuristic.
+    for pane in panes
+        .iter_mut()
+        .filter(|pane| {
+            pane.app.as_deref() == Some("omo")
+                && pane.agent.is_some()
+                && pane.agent_session_id().is_none()
+        })
+        .take(32)
+    {
+        if let Ok(out) = runner.run(
+            "herdr",
+            &[
+                "--session",
+                session,
+                "pane",
+                "process-info",
+                "--pane",
+                &pane.pane_id,
+            ],
+            None,
+            &Env::new(),
+        ) {
+            pane.agent_session = process_session(pane, &out);
+        }
+    }
+    Ok(panes)
+}
+
+/// A process identity is valid only for this pane's one exact OmO process.
+fn process_session(pane: &Pane, text: &str) -> Option<AgentSession> {
+    if pane.app.as_deref() != Some("omo")
+        || pane.agent.is_none()
+        || pane.agent_session_id().is_some()
+    {
+        return None;
+    }
+    if text.len() > 256 * 1024 {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let info = value.pointer("/result/process_info")?;
+    if info.get("pane_id")?.as_str()? != pane.pane_id {
+        return None;
+    }
+    let processes = info.get("foreground_processes")?.as_array()?;
+    if processes.len() > 256 {
+        return None;
+    }
+    // Tool subprocesses may share the foreground group with their owner.
+    // Require one OmO launcher, rather than one process of any kind.
+    let owners: Vec<_> = processes
+        .iter()
+        .filter(|process| {
+            process
+                .get("argv")
+                .and_then(|v| v.as_array())
+                .and_then(|argv| argv.first())
+                .and_then(|v| v.as_str())
+                .is_some_and(|arg| {
+                    std::path::Path::new(arg)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        == Some("omo")
+                })
+        })
+        .collect();
+    let [process] = owners.as_slice() else {
+        return None;
+    };
+    if process.get("cwd")?.as_str()? != pane.cwd.to_str()? {
+        return None;
+    }
+    let argv = process.get("argv")?.as_array()?;
+    if std::path::Path::new(argv.first()?.as_str()?)
+        .file_name()?
+        .to_str()?
+        != "omo"
+    {
+        return None;
+    }
+    let mut ids = Vec::new();
+    for (at, arg) in argv.iter().enumerate().skip(1) {
+        let arg = arg.as_str()?;
+        if arg == "--" {
+            break;
+        }
+        if arg == "--session" {
+            ids.push(argv.get(at + 1)?.as_str()?);
+        } else if let Some(id) = arg.strip_prefix("--session=") {
+            ids.push(id);
+        }
+    }
+    let [id] = ids.as_slice() else {
+        return None;
+    };
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(AgentSession {
+        agent: pane.agent.clone()?,
+        kind: "id".into(),
+        source: "herdr:process-argv".into(),
+        value: (*id).into(),
+    })
 }
 
 /// `herdr --session <session> agent read <pane>`, as the lines it drew.
@@ -654,5 +772,147 @@ mod tests {
             agent_focus(&focus, &key("w:gone")).unwrap_err().kind,
             FailureKind::Gone
         );
+    }
+    fn invented_omo_process() -> serde_json::Value {
+        serde_json::json!({"result":{"process_info":{"pane_id":"w:p1","foreground_processes":[{"cwd":"/srv/arkham","argv":["/opt/omo","--session","owner-a"]}]}}})
+    }
+    fn invented_omo_pane() -> Pane {
+        let mut pane = Pane::answered(
+            "default".into(),
+            "w:p1".into(),
+            "/srv/arkham".into(),
+            PaneStatus::Working,
+        );
+        pane.app = Some("omo".into());
+        pane.agent = Some("pi".into());
+        pane
+    }
+    #[test]
+    fn native_argv_fallback_requires_one_exact_current_pane_and_safe_session_id() {
+        let pane = invented_omo_pane();
+        let source = invented_omo_process();
+        assert_eq!(
+            process_session(&pane, &source.to_string()).unwrap().value,
+            "owner-a"
+        );
+        for case in [
+            "pane",
+            "cwd",
+            "ambiguous",
+            "program",
+            "duplicate",
+            "path",
+            "missing",
+            "cmdline-only",
+            "malformed",
+        ] {
+            let mut source = source.clone();
+            match case {
+                "pane" => source["result"]["process_info"]["pane_id"] = "w:p2".into(),
+                "cwd" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["cwd"] =
+                        "/srv/dunwich".into()
+                }
+                "ambiguous" => {
+                    let p = source["result"]["process_info"]["foreground_processes"][0].clone();
+                    source["result"]["process_info"]["foreground_processes"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(p);
+                }
+                "program" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["argv"][0] =
+                        "/opt/shell".into()
+                }
+                "duplicate" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["argv"] =
+                        serde_json::json!(["omo", "--session", "owner-a", "--session=owner-b"])
+                }
+                "path" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["argv"][2] =
+                        "../owner-a.jsonl".into()
+                }
+                "missing" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["argv"] =
+                        serde_json::json!(["omo", "--session"])
+                }
+                "cmdline-only" => {
+                    source["result"]["process_info"]["foreground_processes"][0]["argv"] =
+                        serde_json::Value::Null;
+                    source["result"]["process_info"]["foreground_processes"][0]["cmdline"] =
+                        "omo --session owner-a".into();
+                }
+                "malformed" => source = serde_json::Value::Null,
+                _ => unreachable!(),
+            }
+            assert!(
+                process_session(&pane, &source.to_string()).is_none(),
+                "{case}"
+            );
+        }
+        let mut with_tool = source.clone();
+        with_tool["result"]["process_info"]["foreground_processes"]
+            .as_array_mut()
+            .unwrap()
+            .push(
+                serde_json::json!({"cwd":"/srv/arkham","argv":["/bin/sh","-c","invented-check"]}),
+            );
+        assert_eq!(
+            process_session(&pane, &with_tool.to_string())
+                .unwrap()
+                .value,
+            "owner-a"
+        );
+        let mut other = pane.clone();
+        other.app = Some("other".into());
+        assert!(process_session(&other, &source.to_string()).is_none());
+        other = pane.clone();
+        other.agent = None;
+        assert!(process_session(&other, &source.to_string()).is_none());
+    }
+    #[test]
+    fn agent_list_recovers_omo_identity_using_a_session_scoped_read_only_process_query() {
+        let list = serde_json::json!({"result":{"agents":[{"pane_id":"w:p1","cwd":"/srv/arkham","agent_status":"working","agent":"pi","tokens":{"app":"omo"}}]}}).to_string();
+        let runner = FakeRunner::default()
+            .with("herdr --session kadath agent list", &list)
+            .with(
+                "herdr --session kadath pane process-info --pane w:p1",
+                &invented_omo_process().to_string(),
+            );
+        let panes = agent_list(&runner, "kadath").unwrap();
+        assert_eq!(panes[0].live_agent_session(), Some("owner-a"));
+        assert_eq!(
+            panes[0].agent_session.as_ref().unwrap().source,
+            "herdr:process-argv"
+        );
+        assert_eq!(panes[0].session, "kadath");
+    }
+    #[test]
+    fn process_identity_fallback_is_bounded_and_does_not_replace_reported_ids() {
+        let agents:Vec<_>=(0..33).map(|n| serde_json::json!({"pane_id":format!("w:p{n}"),"cwd":"/srv/arkham","agent_status":"working","agent":"pi","tokens":{"app":"omo"}})).collect();
+        let list = serde_json::json!({"result":{"agents":agents}}).to_string();
+        let mut runner = FakeRunner::default().with("herdr --session kadath agent list", &list);
+        for n in 0..32 {
+            runner = runner.with(
+                &format!("herdr --session kadath pane process-info --pane w:p{n}"),
+                "{}",
+            );
+        }
+        assert_eq!(agent_list(&runner, "kadath").unwrap().len(), 33);
+        assert_eq!(
+            runner
+                .calls()
+                .iter()
+                .filter(|c| c.argv.contains("process-info"))
+                .count(),
+            32
+        );
+        let list=serde_json::json!({"result":{"agents":[{"pane_id":"w:p1","cwd":"/srv/arkham","agent_status":"working","agent":"pi","tokens":{"app":"omo"},"agent_session":{"agent":"pi","kind":"id","source":"invented","value":"reported-owner"}}]}}).to_string();
+        let runner = FakeRunner::default().with("herdr --session kadath agent list", &list);
+        assert_eq!(
+            agent_list(&runner, "kadath").unwrap()[0].live_agent_session(),
+            Some("reported-owner")
+        );
+        assert_eq!(runner.calls().len(), 1);
     }
 }

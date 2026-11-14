@@ -45,6 +45,8 @@ pub struct Row {
     /// Passive execution record for details and activity-aware rendering.
     pub activity: Option<Activity>,
     pub activity_model: Option<String>,
+    /// Current terminal/worker state, separate from workflow status.
+    pub live_agent_state: Option<String>,
     pub activity_state: Option<String>,
     pub activity_fresh: Option<bool>,
     pub activity_evidence: Vec<String>,
@@ -451,7 +453,41 @@ pub fn cells(
     Row {
         status: node.status.clone(),
         activity: node.activity.clone(),
-        activity_model: node.activity.as_ref().and_then(|a| a.owner_label()),
+        activity_model: node.activity.as_ref().and_then(|a| {
+            if node.agent.as_ref().is_some_and(|agent| {
+                agent.source == crate::model::join::JoinSource::NativeCoordinator
+            }) {
+                a.coordinator_model_label().map(str::to_owned).or_else(|| {
+                    a.coordinator
+                        .as_ref()
+                        .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
+                })
+            } else {
+                a.owner_label()
+            }
+        }),
+        live_agent_state: node
+            .agent
+            .as_ref()
+            .map(|agent| {
+                let state = phrase::pane_state(&agent.pane_status);
+                if agent.source == crate::model::join::JoinSource::NativeCoordinator {
+                    format!("coord {state}")
+                } else if agent.source == crate::model::join::JoinSource::DisplayAgent {
+                    format!("{state} (inferred)")
+                } else {
+                    state
+                }
+            })
+            .or_else(|| {
+                node.activity
+                    .as_ref()
+                    .filter(|a| {
+                        a.state == crate::collect::omo::ActivityState::Working
+                            && a.fresh != Some(false)
+                    })
+                    .map(|_| "worker working".into())
+            }),
         activity_state: node
             .activity
             .as_ref()
