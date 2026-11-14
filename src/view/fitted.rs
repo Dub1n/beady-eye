@@ -158,6 +158,7 @@ pub struct Fitted {
     state_or_nothing: bool,
     compact_tree: bool,
     tree_indent: usize,
+    title_gap: usize,
 }
 
 impl Fitted {
@@ -178,7 +179,21 @@ impl Fitted {
             state_or_nothing: false,
             compact_tree: false,
             tree_indent: 2,
+            title_gap: GAP,
         }
+    }
+
+    /// A branchless fold uses one existing separator cell after its status.
+    pub(crate) fn fold_hint(mut self, arrow: char) -> Self {
+        if let Some(marker) = self
+            .identity
+            .iter_mut()
+            .find(|span| span.content.ends_with(']'))
+        {
+            marker.content.to_mut().push(arrow);
+            self.title_gap = GAP - 1;
+        }
+        self
     }
 
     /// Which spans of the row are links, and where each one points.
@@ -312,7 +327,7 @@ impl Widget for Fitted {
             let ((title, title_drawn), (state, state_linked)) = match self.briefly {
                 None => {
                     let limit = if self.compact_tree {
-                        room.saturating_sub(GAP * 2 + (width / 2).min(12))
+                        room.saturating_sub(self.title_gap + GAP + (width / 2).min(12))
                     } else {
                         room.saturating_sub(GAP)
                     };
@@ -322,7 +337,7 @@ impl Widget for Fitted {
                         self.state_or_nothing,
                     );
                     let left = room - columns(&state) - if state.is_empty() { 0 } else { GAP };
-                    let limit = left.saturating_sub(GAP);
+                    let limit = left.saturating_sub(self.title_gap);
                     let linked = state_links(&state, state_drawn, &links);
                     (
                         fit(
@@ -343,17 +358,17 @@ impl Widget for Fitted {
                         shortened(briefly.spans.clone(), &briefly.shorter, Block::State, 0);
                     let mut room_for_state = columns(&briefest).min(columns(&shortest)) + GAP;
                     if self.compact_tree {
-                        room_for_state =
-                            room_for_state.min(room.saturating_sub(GAP * 2 + (width / 2).min(12)));
+                        room_for_state = room_for_state
+                            .min(room.saturating_sub(self.title_gap + GAP + (width / 2).min(12)));
                     }
-                    let limit = room.saturating_sub(GAP + room_for_state);
+                    let limit = room.saturating_sub(self.title_gap + room_for_state);
                     let (title, title_drawn) = fit(
                         shortened(self.title, &shorter, Block::Title, limit),
                         limit,
                         self.title_or_nothing,
                     );
                     let left = room - columns(&title) - if title.is_empty() { 0 } else { GAP };
-                    let limit = left.saturating_sub(GAP);
+                    let limit = left.saturating_sub(self.title_gap);
                     let state = shortened(self.state, &shorter, Block::State, limit);
                     let state = if columns(&state) <= limit {
                         let linked = state_links(&state, state.len(), &links);
@@ -377,13 +392,13 @@ impl Widget for Fitted {
                 Block::Title,
                 &title,
                 title_drawn,
-                columns(&identity) + GAP,
+                columns(&identity) + self.title_gap,
             ));
             linked.extend(state_linked);
 
             let mut spans = identity;
             if !title.is_empty() {
-                spans.push(Span::raw(" ".repeat(GAP)));
+                spans.push(Span::raw(" ".repeat(self.title_gap)));
                 spans.extend(title);
             }
             if !state.is_empty() {

@@ -371,3 +371,9 @@ when the delegated worker model is unavailable; it must not be called the worker
   heading; show a collapsed bead arrow after its status without a new left column.
 - [x] Keep nonblank active filters visible after leaving search and restore the
   exact saved query cursor when search is reopened. Whitespace alone is no filter.
+
+## Fold-hint placement refinement
+
+- [x] Keep collapsed arrows in the branch for beads with a horizontal connector.
+  Only branchless beads use `[ ]▸ Title`, consuming an existing separator cell so
+  titles stay aligned with expanded rows. Preserve ASCII and legacy layouts.
