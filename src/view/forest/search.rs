@@ -24,11 +24,21 @@ pub(super) enum Sought {
     Holding(String),
     /// The bead whose id is the text.
     Named(String),
+    Restricted(
+        Box<Sought>,
+        std::collections::BTreeSet<crate::model::join::BeadKey>,
+    ),
 }
 
 impl Sought {
+    pub(super) fn restricted(
+        self,
+        allowed: std::collections::BTreeSet<crate::model::join::BeadKey>,
+    ) -> Self {
+        Self::Restricted(Box::new(self), allowed)
+    }
     pub(super) fn holding(text: &str) -> Self {
-        Sought::Holding(text.to_lowercase())
+        Sought::Holding(text.to_string())
     }
 
     pub(super) fn named(text: &str) -> Self {
@@ -41,12 +51,95 @@ impl Sought {
 
     fn finds_bead(&self, bead: &Bead) -> bool {
         match self {
-            Sought::Holding(text) => {
-                bead.id.to_lowercase().contains(text) || bead.title.to_lowercase().contains(text)
-            }
+            Sought::Holding(text) => matches_query(bead, text),
             Sought::Named(text) => bead.id.to_lowercase() == *text,
+            Sought::Restricted(sought, allowed) => {
+                allowed.contains(&bead.key()) && sought.finds_bead(bead)
+            }
         }
     }
+}
+
+/// Status symbols are ORed; an optional title after whitespace is ANDed.
+/// Ordinary text retains case-insensitive ID and title matching.
+pub(crate) fn matches_query(bead: &Bead, text: &str) -> bool {
+    let text = text.trim();
+    if let Some(title) = text.strip_prefix("[ ]") {
+        return crate::view::row::appearance::marker(&bead.status, bead.activity.as_ref()) == "[ ]"
+            && bead
+                .title
+                .to_lowercase()
+                .contains(&title.trim().to_lowercase());
+    }
+    let (head, title) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    if !head.is_empty() && head.chars().all(|c| "~?<TAF-x!SP".contains(c)) {
+        let marker = crate::view::row::appearance::marker(&bead.status, bead.activity.as_ref());
+        head.contains(marker.as_bytes()[1] as char)
+            && bead
+                .title
+                .to_lowercase()
+                .contains(&title.trim().to_lowercase())
+    } else {
+        bead.id.to_lowercase().contains(&text.to_lowercase())
+            || bead.title.to_lowercase().contains(&text.to_lowercase())
+    }
+}
+
+/// Keep matches and their ancestors, without changing node indices or relations.
+/// A reverse reachability walk handles cycles and shared dependencies once.
+pub(super) fn filtered(snapshot: &Snapshot, sought: &Sought) -> Snapshot {
+    use std::sync::Arc;
+    let mut result = snapshot.clone();
+    let filter = |tree: &Arc<Tree>| -> Option<Arc<Tree>> {
+        if tree.beads.is_empty() {
+            return Some(tree.clone());
+        }
+        let mut keep = vec![false; tree.beads.len()];
+        let mut parents = vec![Vec::new(); keep.len()];
+        for (at, links) in tree.children.iter().enumerate() {
+            for link in links {
+                if link.bead < parents.len() {
+                    parents[link.bead].push(at);
+                }
+            }
+        }
+        let mut pending: Vec<_> = tree
+            .beads
+            .iter()
+            .enumerate()
+            .filter(|(_, bead)| sought.finds_bead(bead))
+            .map(|(at, _)| at)
+            .collect();
+        while let Some(at) = pending.pop() {
+            if keep[at] {
+                continue;
+            }
+            keep[at] = true;
+            pending.extend(parents[at].iter().copied());
+        }
+        let root = tree
+            .beads
+            .iter()
+            .position(|bead| bead.id == tree.root)
+            .unwrap_or(0);
+        if !keep[root] {
+            return None;
+        }
+        let mut tree = (**tree).clone();
+        for links in &mut tree.children {
+            links.retain(|link| keep[link.bead]);
+        }
+        Some(Arc::new(tree))
+    };
+    result.trees = snapshot.trees.iter().filter_map(filter).collect();
+    result.collected = snapshot.collected.iter().filter_map(filter).collect();
+    result.hidden_trees.retain(|hidden| {
+        result
+            .collected
+            .iter()
+            .any(|tree| tree.project == hidden.project && tree.root == hidden.root)
+    });
+    result
 }
 
 /// Every drawn copy of a bead a search is after, numbered in the order the

@@ -287,7 +287,13 @@ fn incoming(read: event::Event) -> Option<Event> {
         event::Event::Resize(..) => Some(Event::Resize),
         event::Event::Paste(text) => Some(Event::Pasted(text)),
         event::Event::Mouse(mouse) => match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => Some(Event::Clicked(mouse.row)),
+            MouseEventKind::Down(MouseButton::Left) => {
+                Some(if mouse.modifiers.contains(event::KeyModifiers::CONTROL) {
+                    Event::CtrlClicked(mouse.row)
+                } else {
+                    Event::Clicked(mouse.row)
+                })
+            }
             MouseEventKind::ScrollUp => Some(Event::Scrolled(Notch::Up)),
             MouseEventKind::ScrollDown => Some(Event::Scrolled(Notch::Down)),
             _ => None,

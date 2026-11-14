@@ -179,6 +179,14 @@ impl<'de> Deserialize<'de> for Cell {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Layout {
+    /// Remove the project-to-bead indentation in compact trees.
+    pub root_indent: RootIndent,
+    /// Jump to matches by default; optionally filter the visible tree.
+    pub search_mode: SearchMode,
+    /// Sticky overflow project headings.
+    pub sticky_headers: StickyHeaders,
+    /// Minimum preview content rows, clamped to leave tree space.
+    pub preview_min_height: u16,
     /// Colour square brackets with the status; false inherits the normal row colour.
     #[serde(default = "default_true")]
     pub colour_brackets: bool,
@@ -206,6 +214,33 @@ pub struct Layout {
     pub compact: bool,
 }
 
+/// Project indentation policy; nested bead spacing is independent.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RootIndent {
+    #[default]
+    Never,
+    SingleTree,
+    Always,
+}
+/// What editing the search prompt does to the visible forest.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchMode {
+    #[default]
+    Jump,
+    Filter,
+}
+/// Whether overflow pins the active project or all hidden project headings.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum StickyHeaders {
+    Off,
+    #[default]
+    Active,
+    All,
+}
+
 const fn default_indent() -> u8 {
     2
 }
@@ -217,6 +252,10 @@ impl Default for Layout {
     /// A compact tree row with the status marker and no repeated bead ID.
     fn default() -> Self {
         Self {
+            root_indent: RootIndent::Never,
+            search_mode: SearchMode::Jump,
+            sticky_headers: StickyHeaders::Active,
+            preview_min_height: 6,
             colour_brackets: true,
             dependencies: false,
             identity: vec![Cell::Glyph],

@@ -31,6 +31,9 @@ pub struct Config {
     /// Exact, opt-in disposable fixture provenance, keyed by project.
     #[serde(default)]
     pub fixture_filters: BTreeMap<String, FixtureFilter>,
+    /// Explicit regular expressions for excluding titles, keyed by project.
+    #[serde(default)]
+    pub hide_titles: BTreeMap<String, String>,
     #[serde(default)]
     pub projects: Vec<Project>,
     #[serde(default)]
@@ -1029,6 +1032,7 @@ impl Config {
         Config {
             omo: BTreeMap::new(),
             fixture_filters: BTreeMap::new(),
+            hide_titles: BTreeMap::new(),
             projects,
             roots: Roots::default(),
             badges: Vec::new(),
@@ -1191,6 +1195,15 @@ impl Config {
         }
         if cfg.row.indent == 0 || cfg.row.indent > 16 {
             anyhow::bail!("[row] indent must be between 1 and 16 cells");
+        }
+        for (project, expression) in &cfg.hide_titles {
+            if expression.is_empty() {
+                anyhow::bail!("[hide_titles.{project}] must not be empty");
+            }
+            Regex::new(expression).map_err(|e| anyhow::anyhow!("[hide_titles.{project}]: {e}"))?;
+            if !cfg.is_configured(project) {
+                anyhow::bail!("title filter names unknown project {project}");
+            }
         }
         for (project, filter) in &cfg.fixture_filters {
             if !filter.valid() {

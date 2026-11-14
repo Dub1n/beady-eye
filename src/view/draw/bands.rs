@@ -87,6 +87,7 @@ pub fn key_rows(area: Rect) -> u16 {
 ///
 /// The column is not asked for. Every band spans the width of the screen, so
 /// a row is the whole of what a pointer names.
+#[cfg(test)]
 pub fn line_at(forest: Rect, from: usize, lines: usize, row: u16) -> Option<usize> {
     let within = row.checked_sub(forest.y)? as usize;
     let (top, count, _) = viewport(from, lines, forest.height as usize);

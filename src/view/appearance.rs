@@ -44,14 +44,14 @@ pub fn description(status: &Status, activity: Option<&Activity>) -> String {
     let meaning = match marker {
         "[ ]" => "to-do",
         "[~]" => "in progress",
-        "[<]" => "hooked / prepared",
-        "[?]" => "blocked or needs information",
-        "[T]" => "finished; review or validation pending",
+        "[<]" => "hooked",
+        "[?]" => "blocked",
+        "[T]" => "validation pending",
         "[A]" => "awaiting acceptance",
         "[F]" => "execution failed",
         "[-]" => "execution cancelled",
         "[x]" => "closed",
-        "[!]" => "conflicting evidence; needs attention",
+        "[!]" => "conflicting evidence",
         "[S]" => "deferred",
         "[P]" => "pinned",
         _ => "unknown status",
@@ -155,27 +155,18 @@ mod tests {
     fn selected_status_explains_the_displayed_marker_without_claiming_verification() {
         assert_eq!(description(&Status::InProgress, None), "[~]: in progress");
         assert_eq!(description(&Status::Closed, None), "[x]: closed");
-        assert_eq!(
-            description(&Status::Blocked, None),
-            "[?]: blocked or needs information"
-        );
+        assert_eq!(description(&Status::Blocked, None), "[?]: blocked");
         assert_eq!(
             description(&Status::Other("new-state".into()), None),
             "[?]: unknown status (new-state)"
         );
         for (state, expected) in [
-            (
-                ActivityState::Finished,
-                "[T]: finished; review or validation pending",
-            ),
+            (ActivityState::Finished, "[T]: validation pending"),
             (
                 ActivityState::AwaitingAcceptance,
                 "[A]: awaiting acceptance",
             ),
-            (
-                ActivityState::Conflict,
-                "[!]: conflicting evidence; needs attention",
-            ),
+            (ActivityState::Conflict, "[!]: conflicting evidence"),
         ] {
             let activity = Activity {
                 state,

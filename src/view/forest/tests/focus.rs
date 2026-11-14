@@ -1435,3 +1435,43 @@ fn closing_an_inspected_leaf_keeps_it_until_home_without_focus() {
     assert!(!drawn_here(&forest, "inspected leaf"));
     assert_eq!(forest.snapshot().collected[0].beads.len(), 2);
 }
+
+#[test]
+fn no_agent_group_obeys_completed_toggle_and_never_leaves_excluded_placeholders() {
+    let rows = r#"[
+        {"id":"dun-open","title":"Invented unstaffed work","status":"open"},
+        {"id":"dun-closed","title":"Invented completed work","status":"closed"},
+        {"id":"dun-excluded","title":"Invented excluded work","status":"closed"}
+    ]"#;
+    let beads: Vec<serde_json::Value> = serde_json::from_str(rows).unwrap();
+    let trees = beads
+        .into_iter()
+        .map(|bead| {
+            let mut tree = tree_of("dunwich", &serde_json::json!([bead]).to_string());
+            for bead in &mut tree.beads {
+                if bead.id == "dun-excluded" {
+                    bead.disposable_fixture = true;
+                }
+            }
+            tree
+        })
+        .collect();
+    let source = gather(trees, Vec::new(), Filter::LiveAgents);
+    let mut forest = flatten_compact(source);
+    forest.apply(Action::ExpandForest);
+    assert!(
+        !drawn_here(&forest, "Invented completed work"),
+        "{:?}",
+        sketch(&forest)
+    );
+    assert!(!drawn_here(&forest, "[fixture hidden]"));
+    forest.apply(Action::ToggleCompleted);
+    forest.apply(Action::ExpandForest);
+    assert!(
+        drawn_here(&forest, "Invented completed work"),
+        "{:?}",
+        sketch(&forest)
+    );
+    assert!(!drawn_here(&forest, "[fixture hidden]"));
+    assert!(!drawn_here(&forest, "Invented excluded work"));
+}

@@ -176,7 +176,16 @@ impl Walk<'_> {
     /// agent said as `agent` where the block names one.
     fn block(&self, block: Block, head: Vec<Span<'static>>, agent: Option<&str>) -> Walked {
         let mut walked = Walked::opening(block, head);
-        for cell in self.layout.block(block) {
+        if self.layout.compact {
+            walked.apart = 1;
+        }
+        let mut cells = self.layout.block(block).to_vec();
+        let progress_last =
+            self.layout.compact && block == Block::State && cells.contains(&Cell::Progress);
+        if progress_last {
+            cells.retain(|cell| *cell != Cell::Progress);
+        }
+        for cell in &cells {
             if block == Block::Identity {
                 self.padded(&mut walked, cell, agent);
             } else {
@@ -191,6 +200,10 @@ impl Walk<'_> {
         }
         if block == Block::State {
             self.trailing(&mut walked.spans);
+            if progress_last {
+                walked.cells = usize::from(!walked.spans.is_empty());
+                self.cell(&mut walked, &Cell::Progress, agent);
+            }
         }
         walked
     }
@@ -306,7 +319,10 @@ impl Walk<'_> {
                 }
                 if self.layout.compact && row.activity_state.as_deref() == Some("Activity unknown")
                 {
-                    walked.cell(Span::styled(" · activity unknown", palette::AGENT));
+                    walked.cell(Span::styled(
+                        if label.is_some() { "· ?" } else { "?" },
+                        palette::AGENT,
+                    ));
                 }
                 if row.watched {
                     walked.cell(Span::styled(
@@ -1861,6 +1877,26 @@ mod tests {
             one_length(refused_long),
             "a badge whose link was refused was made one by shortening"
         );
+    }
+
+    #[test]
+    fn compact_unknown_activity_has_no_orphan_separator_and_completion_is_last() {
+        let mut row = row(&node("smt-1", "Invented work", Status::InProgress));
+        row.activity_state = Some("Activity unknown".into());
+        row.progress = Some(row::Progress {
+            finished: 1,
+            total: 4,
+        });
+        let layout = Layout::default();
+        let text = symbols(bead_line(&row, "", &Widths::default(), &layout), 80);
+        assert!(text.trim_end().ends_with("? 1/4"), "{text}");
+        assert!(!text.contains('·'), "{text}");
+        row.activity_model = Some("Luna".into());
+        let text = symbols(bead_line(&row, "", &Widths::default(), &layout), 80);
+        assert!(text.trim_end().ends_with("Luna · ? 1/4"), "{text}");
+        row.notes.push("Invented note".into());
+        let text = symbols(bead_line(&row, "", &Widths::default(), &layout), 100);
+        assert!(text.trim_end().ends_with("Invented note 1/4"), "{text}");
     }
 
     /// Every symbol a row put in the buffer, escape bytes and all.

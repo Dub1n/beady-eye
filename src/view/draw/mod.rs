@@ -33,7 +33,9 @@ use crate::view::query::Query;
 use crate::view::row::{Cell, Layout, Widths, AGENT, WARNING};
 use crate::view::{Freshness, Notice, Said};
 
-pub use bands::{key_rows, line_at, regions, Regions, TailBand};
+#[cfg(test)]
+pub use bands::line_at;
+pub use bands::{key_rows, regions, Regions, TailBand};
 pub(crate) use bead::identity_widths;
 pub use tail::{draw_tail, Band};
 
@@ -42,22 +44,141 @@ use foot::{notices, status_bar};
 use groups::{group_line, item_line, scoped_line};
 use project::{absent_line, project_line, unread_line};
 
-/// Reserve a selected-status row immediately above the shortcuts when enabled.
-/// Tiny terminals retain the forest and keys instead of adding a width barrier.
+/// Reserve a fixed legend row between the bead list and preview or shortcuts.
+/// Tiny terminals keep a tree row and keys before allocating the legend.
 pub fn regions_with_status(area: Rect, lines: usize, band: TailBand, enabled: bool) -> Regions {
-    if !enabled || area.height < 3 {
-        return regions(area, lines, band);
+    if enabled {
+        compact_regions(area, lines, band, crate::view::tail::LINES)
+    } else {
+        regions(area, lines, band)
     }
-    let mut bands = regions(
-        Rect {
-            height: area.height - 1,
-            ..area
-        },
-        lines,
-        band,
-    );
-    bands.keys.y += 1;
+}
+
+/// Reserve configurable preview space, clamping it only to keep a tree row.
+pub fn regions_for_layout(area: Rect, lines: usize, band: TailBand, layout: &Layout) -> Regions {
+    if layout.compact {
+        compact_regions(area, lines, band, layout.preview_min_height)
+    } else {
+        regions_with_status(area, lines, band, false)
+    }
+}
+
+fn compact_regions(area: Rect, lines: usize, band: TailBand, minimum: u16) -> Regions {
+    let mut bands = regions(area, lines, band);
+    let rows = area.height - bands.keys.height;
+    let legend = u16::from(rows >= 2);
+    let available = rows.saturating_sub(legend);
+    let tail = if band == TailBand::Shown {
+        let free = available.saturating_sub(u16::try_from(lines).unwrap_or(u16::MAX));
+        minimum
+            .saturating_add(1)
+            .max(free.min(area.height / 2))
+            .min(available.saturating_sub(1))
+    } else {
+        0
+    };
+    bands.forest.height = available.saturating_sub(tail);
+    bands.tail.y = area.y + bands.forest.height + legend;
+    bands.tail.height = tail;
     bands
+}
+
+/// One screen row's source index and whether it also carries overflow dots.
+#[derive(Debug, Clone, Copy)]
+pub struct VisibleRow {
+    pub at: Option<usize>,
+    pub dots: bool,
+}
+
+/// Shared drawing and pointer geometry, using top-level headers without a walk.
+pub fn visible_rows(forest: &Forest, layout: &Layout, height: usize) -> Vec<VisibleRow> {
+    use crate::view::row::StickyHeaders;
+    let from = forest.from();
+    let lines = forest.lines();
+    if !layout.compact {
+        let (top, count, bottom) = bands::viewport(from, lines.len(), height);
+        return (0..top)
+            .map(|_| VisibleRow {
+                at: None,
+                dots: true,
+            })
+            .chain((from..from + count).map(|at| VisibleRow {
+                at: Some(at),
+                dots: false,
+            }))
+            .chain((0..bottom).map(|_| VisibleRow {
+                at: None,
+                dots: true,
+            }))
+            .collect();
+    }
+    if height == 0 {
+        return Vec::new();
+    }
+    let headers = lines.project_headers();
+    let mut above: Vec<_> = if from > 0 && height >= 3 {
+        match layout.sticky_headers {
+            StickyHeaders::Off => vec![None],
+            StickyHeaders::Active => {
+                vec![headers.iter().copied().filter(|at| *at <= from).next_back()]
+            }
+            StickyHeaders::All => headers
+                .iter()
+                .copied()
+                .filter(|at| *at < from)
+                .map(Some)
+                .collect(),
+        }
+    } else {
+        Vec::new()
+    };
+    let excess = above.len().saturating_sub(height.saturating_sub(1));
+    above.drain(..excess);
+    let mut below = Vec::new();
+    if layout.sticky_headers == StickyHeaders::All && height >= 3 {
+        // Reserve hidden following projects from the bottom inward. Bound by
+        // screen height, leaving at least one actual content row.
+        let room = height.saturating_sub(above.len() + 1);
+        for at in headers.iter().copied().rev() {
+            if below.len() >= room {
+                break;
+            }
+            let end = from.saturating_add(height.saturating_sub(above.len() + below.len()));
+            if at >= end {
+                below.push(at);
+            }
+        }
+        below.reverse();
+    }
+    let from = from
+        + usize::from(
+            layout.sticky_headers == StickyHeaders::Active
+                && from > 0
+                && above.contains(&Some(from)),
+        );
+    let count = height
+        .saturating_sub(above.len() + below.len())
+        .min(lines.len().saturating_sub(from));
+    above
+        .into_iter()
+        .map(|at| VisibleRow { at, dots: true })
+        .chain((from..from + count).map(|at| VisibleRow {
+            at: Some(at),
+            dots: false,
+        }))
+        .chain(below.into_iter().map(|at| VisibleRow {
+            at: Some(at),
+            dots: true,
+        }))
+        .collect()
+}
+
+/// Inverse of the rendered rows, including clickable sticky project headings.
+pub fn forest_line_at(area: Rect, forest: &Forest, layout: &Layout, row: u16) -> Option<usize> {
+    let within = row.checked_sub(area.y)? as usize;
+    visible_rows(forest, layout, area.height as usize)
+        .get(within)?
+        .at
 }
 
 /// The selected bead's marker meaning; headers and summary rows have no bead state.
@@ -174,38 +295,61 @@ pub fn draw(
     let widths = lines.widths();
     let reads = Reads::new(&forest.snapshot().read_at, collecting, lapsed, now);
 
-    let (top, count, bottom) = bands::viewport(forest.from(), lines.len(), height);
-    for row in [
-        (top > 0).then_some(0),
-        (bottom > 0).then_some(height.saturating_sub(1)),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        frame.render_widget(
-            ratatui::text::Line::from("...").centered(),
-            Rect {
-                y: bands.forest.y + row as u16,
-                height: 1,
-                ..bands.forest
-            },
-        );
-    }
-    for (row, (at, line)) in lines.viewport(forest.from(), count).enumerate() {
-        let drawn = fitted(line, widths, layout, &reads);
-        let drawn = if at == selected {
-            drawn.selected()
+    let mut layout = layout.clone();
+    if layout.root_indent == crate::view::row::RootIndent::SingleTree {
+        layout.root_indent = if lines.project_headers().len() == 1 {
+            crate::view::row::RootIndent::Always
         } else {
-            drawn
+            crate::view::row::RootIndent::Never
         };
-        frame.render_widget(
-            drawn,
-            Rect {
-                y: bands.forest.y + (top + row) as u16,
-                height: 1,
-                ..bands.forest
-            },
-        );
+    }
+    let rows = visible_rows(forest, &layout, height);
+    for (row, visible) in rows.iter().enumerate() {
+        let area = Rect {
+            y: bands.forest.y + row as u16,
+            height: 1,
+            ..bands.forest
+        };
+        if let Some(at) = visible.at {
+            if let Some(line) = lines.get(at) {
+                let drawn = fitted(line, widths, &layout, &reads);
+                frame.render_widget(
+                    if at == selected {
+                        drawn.selected()
+                    } else {
+                        drawn
+                    },
+                    area,
+                );
+            }
+        }
+        if visible.dots {
+            frame.render_widget(ratatui::text::Line::from("...").centered(), area);
+        }
+    }
+    if layout.compact && bands.forest.height > 0 && bands.tail.y > bands.forest.bottom() {
+        let y = bands.forest.bottom();
+        let area = Rect {
+            y,
+            height: 1,
+            ..bands.forest
+        };
+        let last = rows
+            .iter()
+            .filter(|row| !row.dots)
+            .filter_map(|row| row.at)
+            .next_back();
+        let below = last.is_some_and(|at| at + 1 < lines.len());
+        let status = selected_status(forest).unwrap_or_default();
+        // Limit the legend to the left half when dots share its row.
+        let legend = Rect {
+            width: if below { area.width / 2 } else { area.width },
+            ..area
+        };
+        frame.render_widget(ratatui::text::Line::raw(status), legend);
+        if below {
+            frame.render_widget(ratatui::text::Line::from("...").centered(), area);
+        }
     }
 
     frame.render_widget(
@@ -250,7 +394,16 @@ pub(super) fn fitted(
         Content::Unread(unread) => unread_line(unread, &line.prefix, widths.of(&Cell::Id)),
         Content::Absent(absent) => absent_line(absent, &line.prefix, widths.of(&Cell::Id)),
         Content::Bead(row) | Content::Waiting(Waiting { row, .. }) => {
-            bead_line(row, &line.prefix, widths, layout)
+            let prefix =
+                if layout.compact && layout.root_indent == crate::view::row::RootIndent::Always {
+                    line.prefix
+                        .chars()
+                        .skip(2 + usize::from(layout.indent))
+                        .collect::<String>()
+                } else {
+                    line.prefix.clone()
+                };
+            bead_line(row, &prefix, widths, layout)
         }
         Content::Elided { count, .. } => elided_run(&line.prefix, *count),
         Content::Orphaned(orphaned) => orphaned_line(orphaned, &line.prefix, widths.of(&Cell::Id)),
@@ -1181,5 +1334,127 @@ render = "{}"
             frame[1],
             frame[unread]
         );
+    }
+}
+
+#[cfg(test)]
+mod compact_controls {
+    use super::tests::*;
+    use super::*;
+    use crate::model::snapshot::ProviderState;
+    use crate::view::painted::Painted;
+    use crate::view::row::{RootIndent, StickyHeaders};
+    use crate::view::{Action, Motion, Notch};
+
+    fn forest() -> Forest {
+        let mut trees = Vec::new();
+        for project in ["summit-works", "arkham", "dunwich"] {
+            let mut tree = grove(12);
+            tree.project = project.into();
+            for bead in &mut tree.beads {
+                bead.project = project.into();
+            }
+            trees.push(tree);
+        }
+        let mut forest = opened(&snapshot(trees, Vec::new(), ProviderState::Answering));
+        forest.laid_out_to(Layout::default());
+        forest.apply(Action::ExpandForest);
+        forest
+    }
+
+    #[test]
+    fn sticky_headers_and_pointer_rows_share_geometry_at_every_scroll_offset() {
+        for sticky_headers in [
+            StickyHeaders::Off,
+            StickyHeaders::Active,
+            StickyHeaders::All,
+        ] {
+            for height in 1..12 {
+                let layout = Layout {
+                    sticky_headers,
+                    ..Layout::default()
+                };
+                let mut forest = forest();
+                forest.laid_out_to(layout.clone());
+                forest.fit(height);
+                for _ in 0..50 {
+                    let rows = visible_rows(&forest, &layout, height);
+                    assert!(rows.len() <= height);
+                    assert!(rows.iter().any(|row| row.at.is_some()));
+                    for (row, expected) in rows.iter().enumerate() {
+                        assert_eq!(
+                            forest_line_at(
+                                Rect::new(0, 7, 40, height as u16),
+                                &forest,
+                                &layout,
+                                7 + row as u16
+                            ),
+                            expected.at
+                        );
+                        if let Some(at) = expected.at.filter(|_| expected.dots) {
+                            assert!(matches!(forest.lines()[at].content, Content::Project(_)));
+                        }
+                    }
+                    forest.scrolled(Notch::Down, 1);
+                }
+                forest.apply(Action::Move(Motion::LastRow));
+                assert!(
+                    visible_rows(&forest, &layout, height)
+                        .iter()
+                        .any(|row| row.at == Some(forest.selected_line())),
+                    "{sticky_headers:?} height {height}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn root_indentation_removal_aligns_the_marker_and_preserves_nested_connectors() {
+        let forest = forest();
+        let layout = Layout {
+            root_indent: RootIndent::Always,
+            ..Layout::default()
+        };
+        let lines: Vec<_> = forest
+            .lines()
+            .viewport(0, 4)
+            .map(|(_, line)| line)
+            .collect();
+        let row = Painted::of(
+            fitted(lines[1], forest.lines().widths(), &layout, &at_rest()),
+            80,
+            1,
+        )
+        .rows()
+        .remove(0);
+        assert!(row.starts_with("[~]"), "{row}");
+        let child = Painted::of(
+            fitted(lines[2], forest.lines().widths(), &layout, &at_rest()),
+            80,
+            1,
+        )
+        .rows()
+        .remove(0);
+        assert_eq!(child.chars().nth(1), Some('├'), "{child}");
+    }
+
+    #[test]
+    fn preview_minimum_and_legend_leave_a_tree_row_on_tiny_terminals() {
+        let layout = Layout {
+            preview_min_height: 12,
+            ..Layout::default()
+        };
+        for height in 1..40 {
+            let area = Rect::new(0, 0, 40, height);
+            let bands = regions_for_layout(area, 100, TailBand::Shown, &layout);
+            assert!(bands.forest.height >= 1);
+            assert!(bands.tail.bottom() <= area.bottom());
+            if height >= 16 {
+                assert!(bands.tail.height >= 13);
+            }
+            if height >= 3 && bands.forest.height > 1 {
+                assert_eq!(bands.forest.bottom() + 1, bands.tail.y);
+            }
+        }
     }
 }

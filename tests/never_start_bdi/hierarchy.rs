@@ -270,3 +270,89 @@ fn parent_root_requests_ancestry_after_a_collection_only_retained_the_focused_su
     assert_eq!(viewer.focused_on(), [parent].into());
     assert_eq!(viewer.lines()[viewer.selected_line()].bead(), Some(&child));
 }
+
+#[test]
+fn live_filter_keeps_ancestors_and_source_relations_and_clears_without_data_loss() {
+    let original = source();
+    let mut view = forest::flatten(original.clone());
+    view.apply(Action::ExpandForest);
+    view.filter_search("~ refunds");
+    let shown: Vec<_> = view
+        .lines()
+        .viewport(0, view.lines().len())
+        .filter_map(|(_, line)| line.bead().map(|key| key.id.clone()))
+        .collect();
+    assert!(
+        shown.contains(&"ark-1".to_string()),
+        "ancestor context: {shown:?}"
+    );
+    assert!(shown.contains(&"ark-1.1".to_string()), "match: {shown:?}");
+    assert!(!shown.contains(&"ark-2".to_string()), "nonmatch: {shown:?}");
+    assert_eq!(
+        view.snapshot().collected.len(),
+        original.hierarchy().collected.len()
+    );
+    view.filter_search("");
+    let shown: Vec<_> = view
+        .lines()
+        .viewport(0, view.lines().len())
+        .filter_map(|(_, line)| line.bead().map(|key| key.id.clone()))
+        .collect();
+    assert!(shown.contains(&"ark-2".to_string()), "cleared: {shown:?}");
+}
+
+#[test]
+fn regex_exclusions_apply_to_every_status_and_reject_invalid_configuration() {
+    let config = "[[projects]]\nname='arkham'\npath='/srv/invented/arkham'\n[hide_titles]\narkham='^Disposable'\n";
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(Config::from_toml(&config.replace("^Disposable", "[")).is_err());
+    assert!(Config::from_toml(&config.replace("^Disposable", "")).is_err());
+    let rows = serde_json::json!([
+        {"id":"ark-0","title":"Container","status":"open"},
+        {"id":"ark-1","title":"Disposable open probe","status":"open","dependencies":[{"depends_on_id":"ark-0","type":"parent-child"}]},
+        {"id":"ark-2","title":"Disposable old probe","status":"closed"},
+        {"id":"ark-3","title":"Keep disposable product","status":"in_progress"}
+    ]);
+    let trackers = Fakes::default().with(
+        "arkham",
+        Fake::holding(parse_beads(&rows.to_string()).unwrap()),
+    );
+    let snapshot = Collection::default().collect(
+        &cfg,
+        &Unasked,
+        &trackers,
+        &Wanted::Everything,
+        Filter::All,
+        Utc::now(),
+    );
+    let mut view = forest::flatten(snapshot);
+    view.apply(Action::ExpandForest);
+    for completed in [false, true] {
+        if completed {
+            view.apply(Action::ToggleCompleted);
+        }
+        let shown: Vec<_> = view
+            .lines()
+            .viewport(0, view.lines().len())
+            .filter_map(|(_, line)| line.bead().map(|key| key.id.clone()))
+            .collect();
+        assert!(!shown.contains(&"ark-1".to_string()), "{shown:?}");
+        assert!(!shown.contains(&"ark-2".to_string()), "{shown:?}");
+        assert!(shown.contains(&"ark-3".to_string()), "{shown:?}");
+    }
+    view.filter_search("Disposable open");
+    assert!(
+        !view
+            .lines()
+            .viewport(0, view.lines().len())
+            .any(|(_, line)| line.bead().is_some()),
+        "excluded matches must not leave unrelated ancestors"
+    );
+    view.filter_search("");
+    view.apply(Action::ToggleFixtures);
+    view.apply(Action::ExpandForest);
+    assert!(view
+        .lines()
+        .viewport(0, view.lines().len())
+        .any(|(_, line)| line.bead().is_some_and(|key| key.id == "ark-1")));
+}

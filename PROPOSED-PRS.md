@@ -11,6 +11,9 @@ Reviewed on 2026-11-14 against upstream
 that upstream commit when checked. Recheck upstream history, issues, PRs and these
 instructions before starting an extraction; this document will become dated.
 
+The completed tree/search follow-up is included as 0.43.0 notes and proposals
+11–13 below; it does not constitute a fresh upstream-head review.
+
 The source pointers below refer to this fork. They are starting points, not
 cherry-pick instructions. Our large initial implementation and later corrections
 combine unrelated features, changed defaults and test-fixture adaptations.
@@ -166,6 +169,18 @@ painted `...` rows would be incomplete.
 **Maintenance benefit:** This can remove recurring fork edits to shared viewport,
 selection and click geometry, rather than merely removing a cosmetic diff.
 
+**Fork follow-up (2026-11-14):** Added `sticky_headers = "active" | "all" | "off"`.
+Active pins the current project; all pins hidden project headings at both ends.
+A shared bounded viewport plan drives painting and pointer mapping without
+materializing hidden lazy subtrees. Selection reveal and scroll limits account
+for pinned headings. The selected-status legend now shares the bottom overflow
+row above the preview. For extraction, keep sticky headers optional, resolve
+header/dots collisions at narrow widths, and either omit the legend or explicitly
+stack proposal 5. Cover multi-project transitions, tiny heights, last-row reveal,
+mouse inverses and both modes. The fork's `compact_controls` tests exercise these
+cases; rebase them onto upstream's original layout rather than its fork defaults.
+
+
 ## 3. Configurable indentation and ASCII connectors
 
 **Priority:** strong general-purpose presentation proposal; a useful renderer base.
@@ -196,6 +211,15 @@ Unicode appearance and indentation as the default.
 - Specify the ASCII option's limits honestly: tree connectors/markers are not the
   same as an entirely ASCII TUI, which also has borders and other symbols.
 - Complete the shared readiness gate and document the configuration upstream.
+
+**Fork follow-up (2026-11-14):** `root_indent = "never" | "single-tree" | "always"`
+can suppress the project-to-bead step while retaining nested marker-centre
+alignment. Never is the fork default. Single-tree counts displayed project
+headings, not configured-but-absent projects. Extract this independently of
+ownership, activity and search; test zero/one/multiple projects, focused roots,
+Unicode/ASCII, ready/dependency rows and changing visibility on refresh. Preserve
+canonical paths and clickable row identity when cropping prefixes.
+
 
 ## 4. Preserve useful titles in narrow tree panes
 
@@ -232,6 +256,15 @@ row, and preserve accessible details for omitted information.
 and standard arrow traversal. Our tests exercise these existing capabilities;
 there is no independent narrow-details implementation to contribute here.
 
+**Fork follow-up (2026-11-14):** Compact state labels now use single spaces and
+put completion after other state cells. Unknown activity is `?`, with `model · ?`
+only when a model label exists. Upstream can take generic spacing/order fixes
+without the native activity provider. Keep configurable legacy cell order and
+original snapshots intact; any evidence-specific label needs proposal 9 or an
+accepted configurable source. Add long/absent/shortened-label and narrow-row tests
+before extracting, including the remaining trailing notes and warning policy.
+
+
 ## 5. Optional bracket markers, colours and a status description
 
 **Priority:** useful optional presentation work; relatively modest maintenance savings.
@@ -266,6 +299,15 @@ status near the shortcuts.
   and inactive rows, no-activity operation and narrow widths. Test the legend with
   the tail shown/hidden, project/group selection and tiny terminal heights.
 - Complete the shared readiness gate for each independently submitted stage.
+
+**Fork follow-up (2026-11-14):** The concise selected-status description is now
+fixed at the bottom of the bead band, above the preview divider, sharing its row
+with bottom overflow dots. Labels include `hooked`, `blocked` and `validation
+pending`. An independent version can show stored-status descriptions only; do
+not require OmO, sticky headers or the fork's marker vocabulary. Coordinate the
+single reserved row with proposal 2, test preview on/off and tiny/narrow screens,
+and retain semantic distinctions between finished execution and stored closure.
+
 
 ## 6. Optional parent-child tree alongside the dependency graph
 
@@ -339,6 +381,18 @@ switching and selected-closure retention in `src/view/forest/mod.rs`.
   tracker failures, completed toggles and inspection retention. Complete the
   shared readiness gate without requiring proposal 6 unless intentionally stacked.
 
+**Fork follow-up (2026-11-14):** Completed visibility now also filters roots
+inside the no-live-agent group. Explicit `[hide_titles] project = '^Invented'`
+regex rules generalize exclusions to any stored status. Invalid/empty patterns
+and unknown projects fail config loading; prior exact provenance rules remain
+supported. Exclusions are independent of `z`, counted and reversible through `x`;
+pure hidden branches leave no placeholder, while necessary ancestry remains
+masked context. Treat regex exclusions as a separate upstream proposal or
+clearly declared optional stage, without the fork's private fixture conventions.
+Tests must cover anchored/case-insensitive patterns, config reload failure,
+open/closed records, ancestry, override, source preservation and no-agent groups.
+
+
 ## 8. Parent-root navigation and optional shortcut aliases
 
 **Priority:** small-to-medium optional navigation proposal; keep key choices separate.
@@ -373,6 +427,20 @@ ancestry tests and real terminal case.
   preference that changes an existing binding and needs explicit discussion.
 - Complete the shared readiness gate. Any claimed existing upstream navigation
   defect still needs its own untouched-upstream reproducer.
+
+**Fork follow-up (2026-11-14):** Double-clicking a bead invokes the existing
+set-root action; Ctrl+click invokes parent-root navigation and selects the clicked
+bead. Record the clicked identity before parent lookup so a deferred ancestry
+collection restores that target rather than the former selection. The fork has
+an invented partial-snapshot mouse regression for this case.
+Clicking an already selected parent toggles expansion. Keep gesture
+recognition, identity, viewport hit-testing and modifier forwarding together;
+exclude tracker/provider code. Test repeated titles across projects, the 400 ms
+boundary, changing rows between clicks, sticky headings, blank/legend clicks,
+focused ancestry after refresh and terminals lacking Ctrl+mouse support. Mouse
+support is separable from rebinding keys. Always redraw a changed root scope
+even if its visible rows happen to remain identical.
+
 
 ## 9. Passive native execution information through an optional adapter
 
@@ -448,6 +516,64 @@ in `src/collect/environment.rs`.
 - Keep this free of viewer, workflow and packaging changes, then complete the
   shared readiness gate.
 
+## 11. Optional live search filtering and status queries
+
+**Tentative title:** `feat(view): add optional live search filtering`
+
+**Fork implementation:** `[row] search_mode = "filter"` retains matching rows and
+ancestor context; jump remains the default. Ctrl+F aliases `/`. Up/Down navigates
+without ending prompt editing. A leading status run ORs its markers; title text
+after whitespace is ANDed (`?~ gateway`). Source relations and JSON stay intact.
+Tree projection uses bounded reverse reachability, including shared dependencies
+and cycles. Ready/configured lists filter matching entries directly.
+
+**To become independent and merge-ready:** Start with text filtering against
+upstream jump search. Agree on Enter/Esc/clear semantics, context-row styling,
+focused ancestry, automatic ancestor expansion and whether status syntax is a
+second PR. Keep stored-status matching independent of execution adapters; derived
+markers need an accepted presentation/evidence source. Preserve case in marker
+prefixes while retaining ordinary case-insensitive text search. Test repeated
+queries, no matches, filtering after acceptance, clearing, prompt arrow editing,
+refresh/fold interactions, projects sharing IDs, lists and large graphs. Ensure
+upstream match counts and next/previous-match traversal respect exactly the same
+scope, exclusions and visibility as rendering. Profile per-edit projection before
+making scalability claims. Reuse the invented PTY filter/arrow regression and
+source-preservation tests; complete the shared contribution gate.
+
+## 12. Scroll the keybinding overlay
+
+**Tentative title:** `feat(tui): scroll keybinding help with arrow keys`
+
+**Fork implementation:** Up/Down scroll the overlay without dismissing it. Other
+keys retain dismissal behavior. Offset is owned by the screen, row drawing is
+bounded and the final page includes the last binding.
+
+**To become independent and merge-ready:** Extract only bindings drawing, screen
+scroll state and event dispatch; no ownership, activity or search prerequisites.
+Agree on reset-on-open versus retained offset, wheel behavior and PgUp/PgDn if
+wanted. Test reaching both ends, one-row windows, resize/clamped offsets, a table
+shorter than the screen and dismissal. Update the title and upstream tests that
+previously promised *any* key dismisses. Retain draining PTY tests and avoid
+adding a process integration binary for a pure rendering test. Complete the
+shared gate; this is a small candidate to extract early.
+
+## 13. Configurable minimum preview height
+
+**Tentative title:** `feat(view): configure the minimum pane preview height`
+
+**Fork implementation:** `[row] preview_min_height` sets preview content rows,
+excluding its delimiter. Available height clamps the minimum to retain a tree
+row; short trees may leave additional room. Drawing, pointer mapping and pane
+read sizing use the same band calculation. Delimiter dragging is intentionally
+outside this increment because it requires a drag-event path.
+
+**To become independent and merge-ready:** Put the setting in the appropriate
+upstream preview configuration section and preserve upstream's current default
+band geometry. Remove the fork legend/sticky-row dependency or explicitly stack
+proposal 2/5. Test smaller/larger/zero minimum, preview hidden/shown, resize, short
+and tall trees, content read sizes and tiny screens. Do not introduce mouse drag
+handling just to extract the setting. Complete the shared contribution gate.
+
 ## Recommended extraction order and maintenance strategy
 
 1. Investigate proposal 1 on untouched upstream, and optionally proposal 10.
@@ -484,3 +610,10 @@ Measure progress by the remaining semantic diff in shared hot spots such as
 PR count. Bracket colours alone remove little maintenance work; accepted viewport,
 renderer and view-boundary changes can remove much more. No proposal's acceptance
 or maintenance saving is guaranteed.
+
+
+Follow-up maintenance: [AGENTS.md](AGENTS.md) requires every completed change to
+update an existing proposal or add an independent candidate here. This catalogue
+now includes the tree/search increment tracked in [INTENDED-CHANGES.md](INTENDED-CHANGES.md).
+Implementation completion does not waive any upstream reproduction, maintainer
+discussion, extraction, validation or actual CI requirements above.

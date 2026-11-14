@@ -65,11 +65,16 @@ fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
             let screen = bdi.answer_to(repaint, GIVING_UP);
             let drawn = terminal::rows_drawn(&screen);
             let text = drawn.join("\n");
+            let legend = drawn
+                .iter()
+                .position(|row| row.starts_with("[T]: validation pending"))
+                .expect("selected status in bead band");
+            let boundary = drawn.iter().position(|row| {
+                row.contains("no pane") || row.contains("──") || row.contains("--")
+            });
             assert!(
-                drawn
-                    .get(22)
-                    .is_some_and(|row| row.starts_with("[T]: finished")),
-                "selected status stays above shortcuts at width {cols}: {text}"
+                boundary.is_some_and(|row| row > legend),
+                "legend above preview at width {cols}: {text}"
             );
             let detail = bdi.send(b"\r");
             bdi.answer_to(detail, GIVING_UP);

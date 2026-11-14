@@ -124,3 +124,82 @@ fn graph_toggle_preserves_dependencies_and_space_and_control_space_have_distinct
     );
     app.send(b"q");
 }
+
+#[test]
+fn filtering_and_arrow_navigation_keep_the_prompt_editable_and_help_scrolls() {
+    let home = a_home_naming_one_project_settled(
+        "filter-keys",
+        "[row]\nsearch_mode='filter'\npreview_min_height=0\n",
+    );
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(&serde_json::json!([
+        {"id":"ark-root","title":"Gateway","status":"open"},
+        {"id":"ark-1","title":"Refund alpha","status":"blocked","dependencies":[{"depends_on_id":"ark-root","type":"parent-child"}]},
+        {"id":"ark-2","title":"Refund beta","status":"in_progress","dependencies":[{"depends_on_id":"ark-root","type":"parent-child"}]},
+        {"id":"ark-3","title":"Other work","status":"open","dependencies":[{"depends_on_id":"ark-root","type":"parent-child"}]}
+    ]).to_string());
+    let mut app = Driven::bdi(18, 80, home, &tracker.environment());
+    app.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    app.read_until(b"Gateway", GIVING_UP);
+    let expand = app.send(b"E");
+    app.answer_to(expand, GIVING_UP);
+    let search = app.send(b"\x06?~ refund\x1b[B");
+    app.answer_to(search, GIVING_UP);
+    let repaint = app.resize(19, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    let rows = terminal::rows_drawn(&screen);
+    assert!(
+        rows.iter().any(|row| row.starts_with("/?~ refund")),
+        "prompt stays active: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("Refund alpha")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("Refund beta")),
+        "{rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("Other work")),
+        "{rows:?}"
+    );
+    let accept = app.send(b"\r");
+    app.answer_to(accept, GIVING_UP);
+    let repaint = app.resize(18, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    assert!(
+        !terminal::rows_drawn(&screen)
+            .iter()
+            .any(|row| row.contains("Other work")),
+        "Enter keeps filter"
+    );
+    let clear_filter = app.send(b"\x06\r");
+    app.answer_to(clear_filter, GIVING_UP);
+    let repaint = app.resize(19, 80);
+    let screen = app.answer_to(repaint, GIVING_UP);
+    assert!(
+        terminal::rows_drawn(&screen)
+            .iter()
+            .any(|row| row.contains("Other work")),
+        "empty accepted filter clears prior search"
+    );
+    let clear = app.send(b"H?");
+    app.answer_to(clear, GIVING_UP);
+    let repaint = app.resize(12, 80);
+    let before = app.answer_to(repaint, GIVING_UP);
+    let scroll = app.send(b"\x1b[B\x1b[B\x1b[B\x1b[B");
+    app.answer_to(scroll, GIVING_UP);
+    let repaint = app.resize(13, 80);
+    let after = app.answer_to(repaint, GIVING_UP);
+    assert!(
+        terminal::rows_drawn(&after)
+            .iter()
+            .any(|row| row.contains("Key bindings")),
+        "help remains open"
+    );
+    assert_ne!(terminal::rows_drawn(&before), terminal::rows_drawn(&after));
+    let close = app.send(b"\x1b");
+    app.answer_to(close, GIVING_UP);
+    app.send(b"q");
+}
