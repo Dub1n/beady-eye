@@ -34,22 +34,43 @@ Each project has its own header; foreign-project rows remain qualified.
 | Key | Action |
 | --- | --- |
 | Up/down, j/k | Select a visible row |
-| Right/l | Make the selected bead the displayed root |
-| Left/h below that root | Select its parent |
-| Left/h on that root | Reveal the level above without changing the selected bead |
+| Right/l | Expand a collapsed branch; otherwise select its first child |
+| Left/h | Collapse an expanded branch; otherwise select its parent |
+| Ctrl+Space | Set the selected bead as root, including within an existing scope |
+| F | Existing focus/restore shortcut |
 | Home | Restore Current work across all unfinished roots |
-| Space | Expand/collapse a branch |
+| Space or Enter | Open details; in details, follow the selected relation or focus its pane |
+| o | Toggle the selected branch fold |
+| b | Switch ownership tree / dependency graph |
+| r | Existing ready list and what its work unblocks |
 | z | Toggle completed records within scope |
 | a | Legacy all/live-agent root filter |
 | v | Cycle Current work, Activity and History |
 | V | Cycle configured custom views |
 | x | Toggle configured disposable fixtures |
-| Enter | Open details; Enter there follows a relation or focuses a known pane |
 | /, n, N | Search, next match, previous match |
 | y | Copy the complete bead ID |
 | t | Toggle pane preview |
 | Ctrl-R | Refresh sources |
 | ? | Show current bindings |
+
+The default tree is an ownership hierarchy: each project-qualified bead appears
+once beneath its actual parent. Blocking dependencies do not become additional
+parents or inflate ownership progress. Missing parents leave children as roots;
+parent cycles are broken deterministically for display and remain qualified.
+Dependency evidence, the existing ready/unblocking list, configured views and
+relation navigation in details remain available. `b` opens the full dependency
+graph, where the same bead can appear through several relationships. These are
+references to the same record, not additional work. The footer prefixes ownership
+mode with `Tree`; graph mode retains the existing scope label. `dependencies = true` under `[row]`
+can select the graph at startup. `--json` retains the complete acquired
+graph rather than changing its contract to a UI projection.
+
+Ctrl+Space accepts the conventional terminal NUL / Ctrl+@ encodings. Use `F` if
+your terminal intercepts that combination. Rooting from a ready/configured list
+opens the selected bead's tree; Home always restores the default ownership view.
+The separate Current/Activity/History scope filter remains available in both
+presentations.
 
 Current work includes roots with open, in-progress, blocked, hooked or other
 unfinished descendants, retaining ancestry. Activity retains work in execution,
@@ -68,7 +89,7 @@ viewports shorter than three rows keep their space for content instead.
 Compact fold arrows retain their branch connectors. Indentation is clipped only
 when needed for title space and only in complete configured steps, so expanded
 and collapsed rows keep the same columns. A one-cell indent retains the branch
-connector and leaves folding to Space rather than dropping the branch for an arrow.
+connector and leaves folding to the arrows or `o` rather than dropping the branch for an arrow.
 
 ## Markers are not database statuses
 

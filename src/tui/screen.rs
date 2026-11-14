@@ -1563,17 +1563,20 @@ mod tests {
             vec![
                 "  Enter     show the selected bead, or focus its pane from the bead view",
                 "  f         focus the selected bead's pane",
-                "  Space     fold or unfold the selected node",
+                "  Space     show the selected bead, as Enter",
+                "  o         fold or unfold the selected node",
                 "  a         show every tree in the collected snapshot",
                 "  z         show or hide completed beads within the current scope",
                 "  x         show or hide configured disposable fixture records",
                 "  ?         show these key bindings",
+                "  b         switch ownership tree and dependency graph",
                 "  r         list only ready beads, in the forest or a view; again for all",
                 "  v         cycle Current, Activity, and History",
                 "  V         open the next view, keeping r; after the last, leave the views",
                 "  s         cycle which copy of a bead opens, under the selected node",
                 "  S         cycle which copy of a bead opens, across the whole forest",
                 "  F         draw the selected bead as the only root, or put the forest back",
+                "  ^Space    set the selected bead as the displayed root",
                 "  t         hide or show the pane's output under the forest",
                 "  /         find part of a bead's id or title, wherever the forest draws it",
                 "  n, ^G     go to the next bead matching the search",
@@ -1591,8 +1594,8 @@ mod tests {
                 "  y         copy the selected bead's id to the clipboard",
                 "  Down, j   move down one row",
                 "  Up, k     move up one row",
-                "  Right, l  focus the selected subtree",
-                "  Left, h   select parent; at displayed root, reveal parent level",
+                "  Right, l  expand, then select the first child",
+                "  Left, h   collapse, then select the parent",
                 "  ^D, PgDn  move down half a screen",
                 "  ^U, PgUp  move up half a screen",
                 "  Home      restore the default current-work forest",
@@ -1639,7 +1642,7 @@ mod tests {
         );
         assert_eq!(
             row_naming(&drawn, "Right, l"),
-            "  Right, l  focus the selected subt…"
+            "  Right, l  expand, then select the…"
         );
         assert_eq!(
             drawn.len(),
@@ -1835,6 +1838,7 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Painted {
+        forest.laid_out_to(Layout::legacy());
         let keys = keys_under(&over, forest);
         let foot = draw::Foot {
             standing: &[],

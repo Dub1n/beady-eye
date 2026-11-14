@@ -179,6 +179,9 @@ impl<'de> Deserialize<'de> for Cell {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Layout {
+    /// Start in the dependency graph rather than the ownership tree.
+    #[serde(default)]
+    pub dependencies: bool,
     pub identity: Vec<Cell>,
     pub title: Vec<Cell>,
     pub state: Vec<Cell>,
@@ -211,6 +214,7 @@ impl Default for Layout {
     /// A compact tree row with the status marker and no repeated bead ID.
     fn default() -> Self {
         Self {
+            dependencies: false,
             identity: vec![Cell::Glyph],
             title: vec![Cell::Title, Cell::Badges],
             state: vec![Cell::Progress, Cell::Agent, Cell::Anomalies],
@@ -229,6 +233,7 @@ impl Layout {
     #[cfg(test)]
     pub fn legacy() -> Self {
         Self {
+            dependencies: true,
             identity: vec![Cell::Glyph, Cell::Id],
             indent: 4,
             show_ids: true,

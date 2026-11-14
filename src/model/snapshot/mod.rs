@@ -8,6 +8,7 @@
 
 mod build;
 mod filter;
+mod hierarchy;
 mod listing;
 
 #[cfg(feature = "testing")]
@@ -688,6 +689,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Ownership-only presentation; dependency relations and source stay intact.
+    pub fn hierarchy(&self) -> Self {
+        hierarchy::project(self)
+    }
+
     /// The projects a run is about, before any of them has been read.
     ///
     /// What the first frame of a run is drawn from. Every other field is

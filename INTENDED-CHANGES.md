@@ -104,22 +104,22 @@ beads. Isolating future tests in a disposable tracker is separate maintenance.
 ## Navigation and refresh stability
 
 - Up/down: highlight the preceding/next visible row.
-- Right on any bead: make that bead the highest displayed bead, retaining its
-  selection. Its subtree becomes the focused scope.
-- Left below the highest displayed bead: select the parent bead.
-- Left on the highest displayed bead: reveal the level above, retaining selection
-  on the same bead. Returning above a project's root restores the project forest.
-- Home: restore the default forest of roots containing unfinished work.
-- Space: expand/collapse the selected branch, independently of focus navigation.
-- Enter: open bead details.
+- Right: expand a collapsed branch; on an expanded branch, select its first child.
+- Left: collapse an expanded branch; otherwise select its parent.
+- Ctrl+Space: set the selected root separately and idempotently. F retains the
+  existing focus/restore action; Home restores the default ownership forest.
+- Home: restore the default ownership forest containing unfinished work.
+- Space and Enter: open bead details, with the same follow/focus action in details.
+- Keep the ready/unblocking view and dependency relations available. Use a
+  separate dependency graph rather than duplicating shared blockers in the
+  default ownership hierarchy. Each project-qualified bead appears once there.
 - Provide discoverable keys for the completed toggle, view switching, search,
   full-ID copying, pane focus and optional preview. Resolve collisions with
   upstream bindings and update help together; unspecified key letters are not
   fixed by this document.
 
-This is deliberate focus navigation: right differs from conventional expand-only
-behaviour. Folding must have its own binding. Project headers and summary rows
-need defined navigation, without being mistaken for selectable bead identities.
+Arrows follow conventional tree navigation. Root selection is an independent
+shortcut, and project headers and summaries keep defined fold/navigation actions.
 
 Preserve selected bead, explicit root, fold state and scroll position across
 refreshes where possible. A bead closing or its worker finishing must not remove

@@ -1174,23 +1174,18 @@ fn live_work_arriving_on_a_bead_the_focused_tree_shares_spends_a_fold_shut_over_
     );
 }
 
-/// Right enters the selected bead's scope without moving the selection;
-/// Left reveals its containing level, while retaining that same bead.
+/// Rooting is independent of normal arrow traversal.
 #[test]
-fn right_focus_and_left_reveal_preserve_the_selected_bead() {
+fn root_shortcut_keeps_selection_and_home_restores_ownership() {
     let mut forest = flatten_compact(snapshot());
     select_bead(&mut forest, "dun-7.1");
     let selected = cursor(&forest).cloned();
-
-    assert!(forest.apply(Action::ExpandOrChild));
+    assert!(forest.apply(Action::FocusForest));
     assert!(forest.is_focused());
     assert_eq!(cursor(&forest), selected.as_ref());
-    assert_eq!(forest.focused_on(), [key("dunwich", "dun-7.1")].into());
-
-    assert!(forest.apply(Action::CollapseOrParent));
-    assert!(forest.is_focused());
+    forest.apply(Action::Home);
+    assert!(!forest.is_focused());
     assert_eq!(cursor(&forest), selected.as_ref());
-    assert_eq!(forest.focused_on(), [key("dunwich", "dun-7")].into());
 }
 
 /// Home returns to CurrentWork and the full forest after focus navigation.
@@ -1198,7 +1193,7 @@ fn right_focus_and_left_reveal_preserve_the_selected_bead() {
 fn home_restores_the_default_scope() {
     let mut forest = flatten_compact(snapshot());
     select_bead(&mut forest, "dun-7.1");
-    forest.apply(Action::ExpandOrChild);
+    forest.apply(Action::FocusForest);
 
     assert!(forest.apply(Action::Home));
     assert!(!forest.is_focused());
@@ -1269,7 +1264,7 @@ fn fixture_mask_preserves_mixed_tree_paths_and_indices() {
 fn a_refresh_that_closes_the_selected_bead_keeps_its_scope_and_selection() {
     let mut forest = flatten_compact(snapshot());
     select_bead(&mut forest, "dun-7.1");
-    forest.apply(Action::ExpandOrChild);
+    forest.apply(Action::FocusForest);
     let selected = cursor(&forest).cloned();
     let changed = edited(
         DUNWICH,
@@ -1411,7 +1406,7 @@ fn compact_lazy_counts_match_eager_rows_under_both_visibility_toggles() {
             eager.lay_out();
             assert_eq!(eager.lines().iter().cloned().collect::<Vec<_>>(), lines);
             assert_eq!(eager.lines().len(), counted);
-            assert_eq!(eager.snapshot().collected, source.collected);
+            assert_eq!(eager.source.collected, source.collected);
         }
     }
 }

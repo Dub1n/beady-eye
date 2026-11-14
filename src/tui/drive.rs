@@ -649,6 +649,8 @@ fn answered(
                 | Action::CycleSpineForest
                 | Action::ToggleFilter
                 | Action::ToggleFixtures
+                | Action::ToggleDependencies
+                | Action::RootSelected
                 | Action::ToggleCompleted
                 | Action::Home
                 | Action::NextScope
@@ -1256,7 +1258,7 @@ pub(super) mod tests {
         let (ask, _asked) = mpsc::channel();
         let events = pressing([
             key(KeyCode::Char('j')),
-            key(KeyCode::Char(' ')),
+            key(KeyCode::Char('o')),
             key(KeyCode::Char('q')),
             key(KeyCode::Char('k')),
         ]);

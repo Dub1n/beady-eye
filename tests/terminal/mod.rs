@@ -227,7 +227,7 @@ pub fn a_home_naming_one_project_settled(named: &str, settings: &str) -> PathBuf
     let legacy = if settings.contains("[row]") {
         ""
     } else {
-        "\n[row]\ncompact=false\nshow_ids=true\nindent=4\nidentity=['glyph','id']\n"
+        "\n[row]\ncompact=false\ndependencies=true\nshow_ids=true\nindent=4\nidentity=['glyph','id']\n"
     };
     std::fs::write(
         home.join(".config/beady-eye/config.toml"),
