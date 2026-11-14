@@ -385,3 +385,30 @@ when the delegated worker model is unavailable; it must not be called the worker
   selections, consistently in rendering and row counts, including refreshes.
 - [x] Double-click opens the clicked bead's details; Alt+click sets it as root.
   Keep Ctrl+click for parent-root navigation and Ctrl+Space as a keyboard fallback.
+
+## Bead-first live agent links
+
+- [x] Recover an omitted OmO session ID from Herdr's exact foreground process
+  argv, with bounded lookups and strict pane/application/identity validation.
+- [x] Join current native worker/direct/coordinator associations to matching live
+  panes within the same project. Ownership is non-exclusive; preserve conflicts
+  and distinguish a live coordinator from an executing delegated worker.
+- [x] Show a compact live-agent indicator and role/state beside the bead's model;
+  expose pane/session/provenance in details and preview/focus from the bead.
+  Linked panes should no longer appear as unclaimed. Count a shared live pane once.
+- [x] Cover missing/ambiguous/stale/conflicting evidence, cross-project IDs,
+  multiple-bead ownership, UI state and end-to-end passive collection in tests.
+
+## Independent assignment, execution and pane state
+
+- [x] Derive active/inactive/unknown execution only from fresh current-attempt
+  native evidence, independently of the displayed stored-status marker.
+- [x] Preserve owner/coordinator links for inactive work. Use active, live, idle
+  and unknown labels with explicit owner/coordinator roles as agreed.
+- [x] Resolve switched OmO sessions from a bounded native runtime registry tied
+  to the exact live PID, current process lifetime, project store, bound socket
+  and verified session header. Never infer assignment from conversational text.
+- [x] Expose assignment, live-agent and execution flags separately in snapshots
+  and details; retain unknown/unassigned states where source records provide none.
+- [x] Cover session switching, stale/ambiguous registry evidence, idle/working
+  panes, hooked-running tasks, completed workers, and incomplete assignments.

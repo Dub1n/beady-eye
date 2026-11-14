@@ -526,6 +526,21 @@ keep paths/metadata/model aliases adapter-owned, and retain invented missing,
 ambiguous, partial, stale, budget, shared-owner and file-replacement tests. No
 agent reporting steps or tracker writes are introduced.
 
+**0.45.0 follow-up to proposal 9:** Current native session associations are joined
+before snapshot construction from validated project rows, independently of
+across-project dependency assembly, supporting many beads per owner and separate
+worker/direct versus coordinator roles. Linked beads expose preview/focus and
+full pane/session provenance; matched panes leave unclaimed diagnostics. Compact
+live indicators survive model-label precedence and primary pane counts deduplicate.
+Source pointers: `src/model/join/activity.rs`, collection ordering and row/details
+rendering. Keep this fork-specific until an upstream provider/association contract
+is agreed. Extract normalized roles and ambiguity/conflict handling without
+hardcoding workflow metadata or direct/delegate strings into upstream core.
+Test missing/old/cross-project/ambiguous sessions, completed native records with a
+live coordinator, explicit join disagreement, shared ownership, terminal removal,
+counts, primary preview selection and narrow-width live indicators. Do not infer
+per-bead execution from a coordinator's terminal status. Complete the shared gate.
+
 ## 10. Portable missing-program test environments
 
 **Priority:** optional small test-only proposal; low product-diff reduction.
@@ -646,6 +661,28 @@ completed visibility toggles, reopening, focused roots, cached/lazy row counts a
 refresh. Complete the shared contribution gate before proposing it upstream.
 
 
+## 15. Recover missing OmO pane session IDs from exact foreground argv
+
+**Tentative title:** `feat(collect): recover missing native agent session ids`
+
+Herdr can report a live OmO agent without an `agent_session` field even while its
+foreground process argv explicitly names the session. The fork uses a bounded,
+session-scoped, read-only process query as a fallback. Existing reported IDs win.
+Only an identified application, matching pane/directory, one foreground executable
+and one safe explicit ID qualify; captions and free-text command lines do not.
+
+**To become independent and merge-ready:** Ask upstream whether identity belongs
+in Herdr's native report first; that could avoid maintaining a second collector.
+If a bdi fallback is wanted, isolate `src/collect/herdr.rs` plus the provider app
+token field, preserve failure degradation and quantify per-collection subprocess
+cost. This fallback can stand apart from proposal 9 because it also supplies
+existing session-key joins; it does not itself remove their exclusive-claim
+rules. Test canonical identity precedence, app/session/pane/CWD mismatch, duplicate
+arguments, session-file paths, malformed/unsupported answers and the 32-lookup
+bound. Do not introduce writeback hooks or change a running agent's session.
+Use invented examples, update terminology/source provenance as agreed and finish
+the shared contribution gate against fresh upstream.
+
 ## Recommended extraction order and maintenance strategy
 
 1. Investigate proposal 1 on untouched upstream, and optionally proposal 10.
@@ -689,3 +726,22 @@ update an existing proposal or add an independent candidate here. This catalogue
 now includes the tree/search increment tracked in [INTENDED-CHANGES.md](INTENDED-CHANGES.md).
 Implementation completion does not waive any upstream reproduction, maintainer
 discussion, extraction, validation or actual CI requirements above.
+
+## 16. Separate execution evidence from agent presence
+
+The fork now exposes independent `assigned`, `agent_live`, `execution` and
+nullable `active` snapshot/listing fields and labels idle, live, active and
+unknown states separately. Current-attempt fresh native running evidence drives
+execution; terminal records are inactive and missing or stale records unknown.
+Hooked status remains independent. Before upstream extraction, agree on a generic
+provider contract and JSON compatibility; extract display/serialization from the
+optional native adapter and preserve upstream defaults. Test mixed workers,
+stale and conflicting records, idle panes, headless workers and narrow rows.
+
+The optional switched-session resolver belongs with proposal 15 or its native
+adapter: it checks a bounded, explicitly configured registry against PID lifetime,
+project store, bound socket and session header. Establish a supported native
+protocol or ask the provider to report current IDs before upstreaming. Preserve
+canonical ID priority, reject ambiguity and unsupported platforms, and cover PID
+reuse, stale sockets, malformed headers and multiple current sessions. Complete
+the shared contribution gate with invented fixtures.

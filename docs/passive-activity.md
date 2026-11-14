@@ -426,3 +426,77 @@ whether content was truncated; genuine clipped text still carries an ellipsis.
 Explicitly collapsing a completed parent takes precedence over automatic
 expansion used to retain a completed selection. The fold stays collapsed across
 refreshes until the user changes it; completed-child visibility still follows `z`.
+
+## Bead-first live agent associations
+
+Current native ownership now participates in the pane join before the snapshot
+is built. When Herdr omits an OmO session ID, the collector can recover it from
+`herdr --session <name> pane process-info --pane <id>`. This is a read, not an
+agent reporting command. It is attempted only for detected OmO applications
+without a reported ID, at most 32 panes per Herdr session per collection. The
+response must name the exact pane, contain one foreground OmO executable in the
+same directory, and carry one safe explicit `--session` ID in argv. Captions,
+process names alone, free-text command lines and directory proximity never
+establish identity. Existing reported IDs keep priority. Unsupported/malformed
+responses leave the pane unlinked rather than inventing a match.
+
+The join matches current-attempt worker/direct and coordinator IDs to unique live
+agent sessions in the same configured project. One owner may be linked to many
+beads. Native conflicts, closed work, missing attempt context, ambiguous live
+sessions, other projects and legacy explicit join refusals are not silently
+awarded an agent. Explicit Beads joins retain priority; exact native worker identity supersedes
+free-text caption inference. A native worker pane
+that disagrees with one requires attention. A coordinator is an additional role,
+not a claim that the delegated worker occupies that terminal.
+
+Compact examples use invented identities:
+
+```text
+[~] Gateway                 @ model-a · working
+[T] Search                  @ coord model-a · working
+```
+
+Unicode uses the existing live-agent glyph in place of `@`. The indicator and
+role lead the label so they survive narrow-pane truncation. A live coordinator
+may own a bead whose worker has finished or whose activity remains unknown;
+its terminal state does not change `[T]`, `[A]`, failure, stored status or
+acceptance. Fresh native worker activity can still be shown without a dedicated
+pane. Idle, waiting or done terminal states remain visible as such.
+
+Details show the linked pane, full agent session, role and identity provenance.
+All exact native pane associations are recorded in execution evidence. Preview
+and pane-focus actions work directly from the bead: prefer a linked worker,
+otherwise the coordinator; with several workers, the first explicitly ordered
+current worker supplies the primary preview and the others remain in details.
+Changing a selection among beads on one pane reuses the same preview. Shared
+primary panes count once in project/tree live-agent summaries. Matched panes no
+longer appear in the unclaimed section; that section remains a diagnostic for
+sources that cannot be associated safely. Unlinked native work remains visible.
+
+These links require no metadata writes, changes to AGENTS.md, hooks, agents'
+reporting duties or pane lifecycle control. Every collection rechecks the live
+pane set, so an ended/missing terminal does not stay live through an old link.
+
+## Assignment and execution
+
+`assigned`, `agent_live`, `execution`, and `active` are separate fields in both
+JSON outputs. `execution` is `active`, `inactive`, or `unknown`; `active` is
+true, false, or null respectively. A fresh running native task for the current
+attempt provides active evidence. A terminal task result provides inactive
+evidence; stale, missing or conflicting evidence remains unknown. A hooked
+`[<]` bead can therefore be active. The Activity scope also includes attention
+work; select `active == true` in JSON for the strict execution set.
+
+Compact labels show `active` for proven execution, `idle` for an idle pane,
+`coord live` for a busy coordinator, and `owner live · ?` when a busy direct
+owner has no bead-specific execution evidence. The role, execution state and
+pane state remain independent. A coordinator can be idle while a delegated
+worker is active; both facts are shown. Details retain the underlying evidence.
+
+Optionally configure an absolute `runtime_directory` under `[omo.<project>]`,
+with `session_directory` also configured, to resolve an OmO session switch in
+an existing process. On Linux, the reader checks a bounded registry against the
+foreground PID and its lifetime, project task store, a bound native socket and
+the session file header. Ambiguous or unavailable evidence leaves the live
+session unknown. Canonical provider-reported IDs retain priority. No chat text,
+agent instructions, tracker writes or native socket requests are used.

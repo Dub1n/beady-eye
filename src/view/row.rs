@@ -39,12 +39,58 @@ pub struct Progress {
     pub total: usize,
 }
 
+/// Independent execution and presence wording for compact rows.
+fn live_state(node: &Node) -> Option<String> {
+    use crate::collect::omo::ExecutionState;
+    use crate::model::{join::JoinSource, types::PaneStatus};
+    let execution = node.execution_state();
+    let Some(agent) = &node.agent else {
+        return (execution == ExecutionState::Active).then(|| "active".into());
+    };
+    let coord = agent.source == JoinSource::NativeCoordinator;
+    let role = if coord {
+        "coord "
+    } else if matches!(
+        agent.source,
+        JoinSource::NativeOwner
+            | JoinSource::AgentSession
+            | JoinSource::AgentPane
+            | JoinSource::DisplayAgent
+    ) && execution != ExecutionState::Active
+    {
+        "owner "
+    } else {
+        ""
+    };
+    let state = match agent.pane_status {
+        PaneStatus::Working if execution == ExecutionState::Active && !coord => "active".into(),
+        PaneStatus::Working => "live".into(),
+        _ => phrase::pane_state(&agent.pane_status),
+    };
+    let inference = if agent.source == JoinSource::DisplayAgent {
+        " (inferred)"
+    } else {
+        ""
+    };
+    let extra = if execution == ExecutionState::Unknown {
+        " · ?"
+    } else if execution == ExecutionState::Active && coord {
+        " · active"
+    } else {
+        ""
+    };
+    Some(format!("{role}{state}{inference}{extra}"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub status: Status,
     /// Passive execution record for details and activity-aware rendering.
     pub activity: Option<Activity>,
     pub activity_model: Option<String>,
+    /// Current terminal/worker state, separate from workflow status.
+    pub live_agent_state: Option<String>,
+    pub agent_identity: Option<String>,
     pub activity_state: Option<String>,
     pub activity_fresh: Option<bool>,
     pub activity_evidence: Vec<String>,
@@ -451,7 +497,24 @@ pub fn cells(
     Row {
         status: node.status.clone(),
         activity: node.activity.clone(),
-        activity_model: node.activity.as_ref().and_then(|a| a.owner_label()),
+        activity_model: node.activity.as_ref().and_then(|a| {
+            if node.agent.as_ref().is_some_and(|agent| {
+                agent.source == crate::model::join::JoinSource::NativeCoordinator
+            }) {
+                a.coordinator_model_label().map(str::to_owned).or_else(|| {
+                    a.coordinator
+                        .as_ref()
+                        .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
+                })
+            } else {
+                a.owner_label()
+            }
+        }),
+        live_agent_state: live_state(node),
+        agent_identity: node
+            .agent
+            .as_ref()
+            .map(|a| a.title.clone().unwrap_or_else(|| a.pane.id.clone())),
         activity_state: node
             .activity
             .as_ref()

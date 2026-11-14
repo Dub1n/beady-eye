@@ -5,6 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+mod activity;
+pub use activity::connect_activity;
+
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -23,6 +26,12 @@ pub enum JoinSource {
     AgentPane,
     /// The pane named the bead. Inferred from free text.
     DisplayAgent,
+    /// Exact native worker/direct session, matched to a current live pane.
+    NativeWorker,
+    /// A direct attempt owner, independently of per-bead execution evidence.
+    NativeOwner,
+    /// Exact coordinator session; this does not assert delegated worker liveness.
+    NativeCoordinator,
 }
 
 /// A bead, across every tracker `bdi` reads. Prefixes are per-tracker and
@@ -209,6 +218,8 @@ impl<'a> Listed<'a> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Joined {
     pub agents: BTreeMap<BeadKey, AgentRef>,
+    /// Additional exactly linked native panes, including coordinator roles.
+    pub linked_panes: BTreeSet<PaneKey>,
     /// Beads whose own key named a live pane the join would not award them,
     /// and the disagreement that refused it. Only the exact direction is here:
     /// a bead that named nothing has no claim to refuse, and a pane naming an
@@ -550,6 +561,7 @@ pub fn resolve(trees: &[ProjectRows<'_>], listed: Listed<'_>, cfg: &Config) -> J
 
     Joined {
         agents,
+        linked_panes: BTreeSet::new(),
         refused,
         out_of_reach,
         under_a_seat: BTreeSet::new(),
@@ -609,7 +621,10 @@ fn agent_ref(pane: &Pane, source: JoinSource) -> AgentRef {
 /// Live panes that resolved to no bead in any tree.
 pub fn unattributed<'a>(panes: &'a [Pane], joined: &Joined) -> Vec<&'a Pane> {
     let taken: HashSet<&PaneKey> = joined.agents.values().map(|a| &a.pane).collect();
-    panes.iter().filter(|p| !taken.contains(&p.key())).collect()
+    panes
+        .iter()
+        .filter(|p| !taken.contains(&p.key()) && !joined.linked_panes.contains(&p.key()))
+        .collect()
 }
 
 #[cfg(test)]

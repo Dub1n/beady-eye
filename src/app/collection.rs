@@ -728,6 +728,17 @@ impl Collection {
     ) -> Result<Snapshot, BTreeSet<String>> {
         let rooted = cfg;
         let cfg = &self.widened(rooted);
+        let mut native_panes = panes.to_vec();
+        for pane in &mut native_panes {
+            let config = join::project_of(pane, &cfg.projects).and_then(|p| cfg.omo.get(&p.name));
+            if let Some(config) = config {
+                if let Err(error) = crate::collect::omo::resolve_runtime_session(pane, config) {
+                    pane.state_labels
+                        .insert("bdi-session-identity".into(), error);
+                }
+            }
+        }
+        let panes = native_panes.as_slice();
         let answered: Vec<(&str, &ProjectWork)> = self.that_answered(cfg).collect();
         let drawn = reaching_across(&answered, &rooted.scope, &self.reached.trees);
         // Over every tree, focused or not, so that leaving the focus has
@@ -787,12 +798,6 @@ impl Collection {
             },
             rooted,
         );
-        for (project, _, read) in &drawn {
-            if let Ok(assembled) = read {
-                joined.cover(project, assembled, now);
-            }
-        }
-        let joined = &joined;
 
         let watching: BTreeMap<&str, BTreeMap<String, Watchers>> = answered
             .iter()
@@ -851,6 +856,22 @@ impl Collection {
             }
         }
         drop(readers);
+        // Native ownership belongs to the validated project source rows,
+        // independently of whether a displayed tree was assembled across projects.
+        let native_rows: Vec<_> = answered
+            .iter()
+            .map(|(project, work)| ProjectRows {
+                project,
+                rows: &work.beads,
+            })
+            .collect();
+        join::connect_activity(&mut joined, &mut activities, &native_rows, panes, cfg);
+        for (project, _, read) in &drawn {
+            if let Ok(assembled) = read {
+                joined.cover(project, assembled, now);
+            }
+        }
+        let joined = &joined;
         let trees = focused
             .iter()
             .map(|(project, root, read)| match read {

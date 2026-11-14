@@ -129,3 +129,70 @@ fn compact_detail_relations_use_brackets_at_narrow_and_wide_widths() {
         }
     }
 }
+
+#[test]
+fn live_native_owners_are_visible_on_beads_and_open_their_linked_details() {
+    use terminal::shims::ShimmedHerdr;
+    for cols in [30, 60] {
+        let home = a_home_naming_one_project_settled(
+            &format!("live-native-{cols}"),
+            "[row]\nascii=true\nhide_root_indent='always'\n",
+        );
+        let config_path = home.join(".config/beady-eye/config.toml");
+        let mut config = std::fs::read_to_string(&config_path).unwrap();
+        let logs = home.join("native-sessions");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("invented_owner-a.jsonl"),
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({"type":"session","version":3,"id":"owner-a"}),
+                serde_json::json!({"type":"model_change","provider":"invented","modelId":"model-a"})
+            ),
+        )
+        .unwrap();
+        config.push_str(&format!(
+            "\n[omo.arkham]\ntask_directory='{}'\nsession_directory='{}'\n",
+            logs.join("tasks").display(),
+            logs.display()
+        ));
+        std::fs::write(config_path, config).unwrap();
+        let tracker = ShimmedTracker::beside(&home);
+        tracker.holds(&serde_json::json!([
+            {"id":"ark-1","title":"Gateway","status":"in_progress","metadata":{"qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"direct"}}}},
+            {"id":"ark-2","title":"Search","status":"in_progress","metadata":{"qrclipWork":{"attempt":{"id":"attempt-b","coordinator":"owner-a","mode":"delegate"}}}}
+        ]).to_string());
+        let herdr = ShimmedHerdr::beside(&home);
+        let project_path = home.join("arkham");
+        // Use the project directory configured by the shared invented home.
+        let configured: toml::Value = toml::from_str(
+            &std::fs::read_to_string(home.join(".config/beady-eye/config.toml")).unwrap(),
+        )
+        .unwrap();
+        let cwd = configured["projects"][0]["path"]
+            .as_str()
+            .unwrap_or(project_path.to_str().unwrap());
+        herdr.holds_in("default",&serde_json::json!({"result":{"agents":[{"pane_id":"w:p1","cwd":cwd,"agent_status":"working","agent":"pi","title":"Invented coordinator","agent_session":{"agent":"pi","kind":"id","source":"invented","value":"owner-a"}}]}}).to_string());
+        let mut env = tracker.environment();
+        env.extend(herdr.environment());
+        let mut app = Driven::bdi(28, cols, home, &env);
+        app.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+        app.read_until(b"model-a", GIVING_UP);
+        let seek = app.send(b"/ark-2\r");
+        app.answer_to(seek, GIVING_UP);
+        let repaint = app.resize(29, cols);
+        let screen = app.answer_to(repaint, GIVING_UP);
+        let text = terminal::rows_drawn(&screen).join("\n");
+        assert!(text.contains("@ model-a"), "{cols}: {text}");
+        if cols >= 60 {
+            assert!(text.contains("coord live"), "{text}");
+        }
+        assert!(!text.contains("unclaimed pane"), "{text}");
+        let detail = app.send(b"\r");
+        app.answer_to(detail, GIVING_UP);
+        let repaint = app.resize(30, cols);
+        let screen = app.answer_to(repaint, GIVING_UP);
+        assert_eq!(terminal::window_over(&screen).as_deref(), Some("ark-2"));
+        app.send(b"\x1bq");
+    }
+}

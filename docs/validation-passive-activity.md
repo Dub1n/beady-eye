@@ -319,3 +319,73 @@ production/all-target Clippy with warnings denied and the three extracted
 upstream source scans passed. The canonical installed binary reports 0.44.2.
 Nix/macOS and a fresh live Herdr pane were not exercised; the user's pane was
 not restarted. Empty remote checks do not constitute a green CI verdict.
+
+## 0.45.0 bead-first native live-agent association
+
+The native adapter's current ownership now participates in the pane join before
+snapshot construction. A detected OmO application without a reported session ID
+can resolve one exact foreground argv session through a bounded, read-only,
+Herdr-session-scoped process query. Existing IDs keep priority; ambiguity,
+malformed/unsupported envelopes, directory/pane mismatch, unsafe IDs and duplicate
+arguments are rejected. At most 32 missing identities are queried per Herdr
+session per collection. No native lifecycle report or Beads update is issued.
+
+A private live case revealed both a missing runtime identity and ownership lost
+when a displayed dependency tree used the across-project assembly path. The join
+now uses validated per-project source rows independently of that projection.
+The corrected live JSON read associated 17 unfinished current attempts with one
+pane: 3 worker/direct links and 14 coordinator links, with zero unclaimed panes
+for that source. All 17 carried verified argv provenance and coordinator model
+identity. Native execution remained Finished for 10 and Unknown for 7; stored
+statuses remained in-progress for 13 and hooked for 4. The primary live pane was
+counted once. These are point-in-time association observations, not proof of
+simultaneous per-bead execution or acceptance. Private identifiers, captures and
+paths were not committed, and the running user pane was not controlled.
+
+Invented tests cover exact process parsing, canonical ID precedence, lookup
+bounds, current/shared/missing/old/cross-project/ambiguous ownership, native
+completion alongside a live coordinator, explicit worker/pane disagreement,
+source-to-snapshot association through across-project assembly, deduplicated
+counts, preview targeting and removal of liveness when a terminal disappears.
+Real terminal tests at 30/60 columns verify visible live/role markers and opening
+linked details. Headless workers retain native activity evidence without gaining
+a fabricated pane. Primary preview prefers an explicitly linked worker, then the
+coordinator; additional native pane links remain in execution details.
+
+One full run failed the existing undrained-terminal quit check while other builds
+were active; its unchanged two-test target subsequently passed. The first live
+readback also caught the need to exercise actual provider envelopes and the
+across-project ownership path rather than relying only on isolated fixtures.
+Those failed/private outputs were retained outside the repository. Nix/macOS
+and a fresh interactive Herdr viewer were not exercised.
+
+The final full Cargo suite passed: 2,814 tests, 3 ignored, 44 reported targets.
+The native-join target was rerun after adding the explicit old-session case;
+all five tests passed. Production/all-target Clippy with warnings denied,
+formatting and the three extracted source scans passed. The canonical installed
+binary reports 0.45.0. Live JSON validation and invented PTY coverage are separate
+from exercising the user's interactive viewer after reopening it.
+
+## 0.46.0 independent execution and session switches
+
+A read-only investigation found current attempts referring to a newer logical
+session than the live process's launch argument. The native registry identifies
+the current session by process PID; verification now additionally requires the
+same process lifetime, project store, registered and bound socket inode, and
+matching session header. Native hard-link and symlink socket layouts are covered.
+Ambiguous or unsupported evidence clears the launch-ID fallback. Canonical
+provider IDs remain authoritative. The configured registry was added after a
+local config backup; no tracker or agent workflow was modified.
+
+The source snapshot changed during validation: two previously reported attempts
+closed and a third remained open without an attempt or assignee. A later live
+JSON read linked seven current beads to the live pane, with no runtime-identity
+errors: one active, three inactive and three unknown. This is a point-in-time
+read, not a claim about the earlier agent message or simultaneous execution.
+No real IDs, paths or session records are included in test fixtures.
+
+The full Cargo suite passed 2,820 tests with 3 ignored; after the socket-layout
+fix all five focused runtime tests passed. All-target Clippy, formatting and
+available extracted source scans passed. Real terminal tests and a state matrix
+cover idle/live/active labels; Linux live JSON was checked separately. Nix,
+macOS and a newly reopened interactive Herdr pane were not exercised.

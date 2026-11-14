@@ -248,6 +248,7 @@ pub struct Readiness {
 pub struct Counts {
     pub total: usize,
     pub finished: usize,
+    /// Distinct primary live panes plus native active work without a pane.
     pub live_agents: usize,
     /// Beads carrying at least one anomaly, not rules fired. Every other count
     /// here counts beads, and a header's warning count sends a reader looking
@@ -281,13 +282,16 @@ impl Counts {
             finished: once.iter().filter(|n| n.status.is_finished()).count(),
             live_agents: once
                 .iter()
-                .filter(|n| {
-                    n.agent.is_some()
-                        || n.activity
-                            .as_ref()
-                            .is_some_and(|a| a.state == crate::collect::omo::ActivityState::Working)
-                })
-                .count(),
+                .filter_map(|n| n.agent.as_ref().map(|a| &a.pane))
+                .collect::<BTreeSet<_>>()
+                .len()
+                + once
+                    .iter()
+                    .filter(|n| {
+                        n.agent.is_none()
+                            && n.execution_state() == crate::collect::omo::ExecutionState::Active
+                    })
+                    .count(),
             anomalies: once
                 .iter()
                 .filter(|n| {
@@ -387,6 +391,28 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn execution_state(&self) -> crate::collect::omo::ExecutionState {
+        self.activity
+            .as_ref()
+            .map_or(crate::collect::omo::ExecutionState::Unknown, |a| {
+                a.execution_state()
+            })
+    }
+    pub fn assigned(&self) -> bool {
+        !self.status.is_finished()
+            && (self.agent.is_some()
+                || self.activity.as_ref().is_some_and(|a| {
+                    a.attempt_id.as_deref().is_some_and(|id| !id.is_empty())
+                        && (a.coordinator.is_some()
+                            || a.child_session.is_some()
+                            || !a.workers.is_empty())
+                }))
+    }
+    pub fn agent_live(&self) -> bool {
+        self.agent.is_some()
+            || self.execution_state() == crate::collect::omo::ExecutionState::Active
+    }
+
     /// What the bead is known by wherever it is drawn.
     pub fn key(&self) -> BeadKey {
         BeadKey {
@@ -486,6 +512,10 @@ struct Drawn<'a> {
     closed_at: Option<DateTime<Utc>>,
     badges: &'a [Badged],
     agent: Option<&'a AgentRef>,
+    execution: crate::collect::omo::ExecutionState,
+    active: Option<bool>,
+    assigned: bool,
+    agent_live: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     activity: Option<&'a crate::collect::omo::Activity>,
     anomalies: &'a [Anomaly],
@@ -513,6 +543,14 @@ impl Tree {
                     closed_at: node.closed_at,
                     badges: &node.badges,
                     agent: node.agent.as_ref(),
+                    execution: node.execution_state(),
+                    active: match node.execution_state() {
+                        crate::collect::omo::ExecutionState::Active => Some(true),
+                        crate::collect::omo::ExecutionState::Inactive => Some(false),
+                        crate::collect::omo::ExecutionState::Unknown => None,
+                    },
+                    assigned: node.assigned(),
+                    agent_live: node.agent_live(),
                     activity: node.activity.as_ref(),
                     anomalies: &node.anomalies,
                     orphaned_dependencies: &node.orphaned_dependencies,
@@ -1013,7 +1051,14 @@ render = "⏸ waiting"
 
         let row = json["nodes"][1].as_object().expect("a row is an object");
         let mut expected: BTreeSet<&str> = bead.keys().map(String::as_str).collect();
-        expected.extend(["depth", "edge"]);
+        expected.extend([
+            "depth",
+            "edge",
+            "execution",
+            "active",
+            "assigned",
+            "agent_live",
+        ]);
         assert_eq!(
             row.keys().map(String::as_str).collect::<BTreeSet<_>>(),
             expected

@@ -1298,6 +1298,8 @@ fn bead_line(
         content.notes.clear();
         content.activity = None;
         content.activity_model = None;
+        content.live_agent_state = None;
+        content.agent_identity = None;
         content.activity_state = None;
         content.activity_fresh = None;
         content.activity_evidence.clear();
