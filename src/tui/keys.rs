@@ -100,7 +100,7 @@ pub(super) const BINDINGS: &[Binding] = &[
     Binding {
         keys: &[alone(KeyCode::Char('x'), "x")],
         action: Action::ToggleFixtures,
-        does: "show or hide configured disposable fixture records",
+        does: "show or hide records excluded by configured rules",
         hint: None,
     },
     Binding {
@@ -164,7 +164,7 @@ pub(super) const BINDINGS: &[Binding] = &[
         hint: None,
     },
     Binding {
-        keys: &[alone(KeyCode::Char('/'), "/")],
+        keys: &[alone(KeyCode::Char('/'), "/"), ctrl('f', "^F")],
         action: Action::Search,
         does: "find part of a bead's id or title, wherever the forest draws it",
         hint: Some("find"),

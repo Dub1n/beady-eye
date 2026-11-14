@@ -62,6 +62,7 @@ pub struct Origin {
     opened_by_the_last_step: BTreeSet<Handle>,
     searched: Option<String>,
     standing: Option<(Place, bool)>,
+    search_filter: String,
 }
 
 /// One snapshot's lines in render order, with the fold state and the selection
@@ -136,6 +137,7 @@ pub struct Forest {
     /// A selected bead that became closed during refresh remains visible until Home.
     preserve_completed: Option<BeadKey>,
     reveal_selection: Option<BeadKey>,
+    search_filter: String,
 }
 
 /// Flatten a snapshot into its lines.
@@ -169,6 +171,7 @@ pub fn flatten(snapshot: Snapshot) -> Forest {
         pinned_root: None,
         preserve_completed: None,
         reveal_selection: None,
+        search_filter: String::new(),
     };
     forest.lay_out();
     forest.select_first_root();
@@ -265,10 +268,20 @@ impl Forest {
         if self.lines.len() <= self.room {
             0
         } else {
-            // At the end only the top indicator takes a row.
+            let pinned = if self.layout.compact
+                && self.layout.sticky_headers == row::StickyHeaders::All
+                && self.room >= 3
+            {
+                self.lines
+                    .project_headers()
+                    .len()
+                    .min(self.room.saturating_sub(1))
+            } else {
+                usize::from(self.room >= 3)
+            };
             self.lines
                 .len()
-                .saturating_sub(self.room.saturating_sub(usize::from(self.room >= 3)))
+                .saturating_sub(self.room.saturating_sub(pinned))
         }
     }
 
@@ -328,10 +341,24 @@ impl Forest {
                     .min(self.furthest());
             }
         }
+        if self.layout.compact
+            && self.room > 0
+            && !crate::view::draw::visible_rows(self, &self.layout, self.room)
+                .iter()
+                .any(|row| row.at == Some(self.selected))
+        {
+            self.from = self.selected.min(self.furthest());
+        }
         self.from != was
     }
 
-    /// Measure the identity widths over these cells from now on.
+    /// Apply a presentation-only search, retaining ancestor context.
+    pub fn filter_search(&mut self, query: &str) {
+        self.search_filter = query.to_string();
+        self.lay_out();
+    }
+
+    /// Measure identities and render rows using the current settings.
     pub fn laid_out_to(&mut self, layout: row::Layout) {
         if self.layout == layout {
             return;
@@ -709,6 +736,7 @@ impl Forest {
                 self.named_at_launch = false;
                 self.list = None;
                 self.unblocking.clear();
+                self.search_filter.clear();
                 self.show_completed = false;
                 self.show_fixtures = false;
                 self.pinned_root = None;
@@ -821,7 +849,9 @@ impl Forest {
             Action::RootUp => return self.root_up(),
             Action::RootSelected => {
                 self.root_selected();
-                true
+                self.lay_out();
+                self.reveal();
+                return true;
             }
             Action::FocusForest => {
                 self.focus_forest();
@@ -1626,7 +1656,14 @@ impl Forest {
             opened_by_the_last_step: self.folds.opened_by_the_last_step(),
             searched: self.searched.clone(),
             standing: self.standing_at(),
+            search_filter: self.search_filter.clone(),
         }
+    }
+
+    /// Cancel prompt edits, including a filter accepted before this prompt.
+    pub fn cancel_search(&mut self, origin: &Origin) {
+        self.search_filter.clone_from(&origin.search_filter);
+        self.restore(origin);
     }
 
     /// Put the selection, the scroll, what the last search step opened and
@@ -1810,7 +1847,38 @@ impl Forest {
     ///
     /// In the ready list they are the beads its rows draw, so a search lands
     /// on a bead the list shows or finds nothing.
+    fn restricted_sought(&self, sought: Sought) -> Sought {
+        let allowed = self
+            .snapshot
+            .trees
+            .iter()
+            .chain(&self.snapshot.collected)
+            .flat_map(|tree| {
+                tree.beads
+                    .iter()
+                    .filter(move |bead| {
+                        (self.show_fixtures || !bead.disposable_fixture)
+                            && (self.show_completed
+                                || !bead.status.is_finished()
+                                || self
+                                    .preserve_completed
+                                    .as_ref()
+                                    .is_some_and(|key| bead.is(key))
+                                || (matches!(self.snapshot.filter, Filter::History | Filter::All)
+                                    && bead.id == tree.root))
+                    })
+                    .map(|bead| bead.key())
+            })
+            .collect();
+        if self.layout.compact {
+            sought.restricted(allowed)
+        } else {
+            sought
+        }
+    }
+
     fn matches(&self, sought: Sought) -> Matches<'_> {
+        let sought = self.restricted_sought(sought);
         if self.list.is_some() {
             let rows = self.lines.iter().filter_map(Self::place_of_a_bead);
             return Matches::Listed(Listed::of(&self.snapshot, rows.collect(), &sought));
@@ -2048,14 +2116,38 @@ impl Forest {
         let mut view = self.snapshot.clone();
         if !self.show_fixtures {
             view.trees.retain(|tree| {
+                let excluded_root = tree
+                    .beads
+                    .iter()
+                    .any(|root| root.id == tree.root && root.disposable_fixture);
                 tree.tracker != TrackerState::Ok
                     || tree.beads.is_empty()
-                    || tree.beads.iter().any(|bead| !bead.disposable_fixture)
+                    || tree.beads.iter().any(|bead| {
+                        !bead.disposable_fixture
+                            && (!excluded_root
+                                || self.show_completed
+                                || !bead.status.is_finished()
+                                || self
+                                    .preserve_completed
+                                    .as_ref()
+                                    .is_some_and(|key| bead.is(key)))
+                    })
             });
         }
+        let filtered_facts;
+        let facts = if self.search_filter.is_empty() {
+            &self.facts
+        } else {
+            view = search::filtered(
+                &view,
+                &self.restricted_sought(Sought::holding(&self.search_filter)),
+            );
+            filtered_facts = Arc::new(Facts::of(&view, self.spine, &self.spines, None));
+            &filtered_facts
+        };
         let drawn = layout::lay_out_preserving(
             &view,
-            &self.facts,
+            facts,
             &self.folds,
             &rooted,
             &self.layout,
@@ -2094,6 +2186,7 @@ impl Forest {
             &self.rooted(),
             &self.unblocking,
             &self.layout,
+            (&self.search_filter, self.show_fixtures),
         );
         let was = std::mem::replace(&mut self.lines, drawn);
         if self.find_cursor().is_none() {

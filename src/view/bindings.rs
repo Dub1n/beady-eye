@@ -9,7 +9,7 @@ use crate::view::fitted::{columns, cover, indent, Fitted, CUT, GAP};
 use crate::view::palette;
 
 /// The first line of the key bindings view, and the way back out of it.
-const CLOSE_BINDINGS: &str = "Key bindings · press any key to close";
+const CLOSE_BINDINGS: &str = "Key bindings · Up/Down · Esc to close";
 
 /// Where the bindings window sits: the size its table wants, centred over the
 /// forest, and clamped by the screen where the screen is the smaller.
@@ -88,6 +88,16 @@ fn key_column(bindings: &[(String, &str)]) -> usize {
 /// than the screen it sits on, so that is the ordinary case rather than the
 /// short-terminal one.
 pub fn key_bindings(frame: &mut Frame, area: Rect, bindings: &[(String, &str)]) {
+    key_bindings_from(frame, area, bindings, 0);
+}
+
+/// Draw the same help window starting at a bounded scroll offset.
+pub fn key_bindings_from(
+    frame: &mut Frame,
+    area: Rect,
+    bindings: &[(String, &str)],
+    offset: usize,
+) {
     let window = bindings_window(area, bindings);
     if window.is_empty() {
         return;
@@ -101,8 +111,10 @@ pub fn key_bindings(frame: &mut Frame, area: Rect, bindings: &[(String, &str)]) 
     let room = inner.height as usize;
     // A last row spent saying that one binding is missing would be better
     // spent on the binding, so the count is never drawn over fewer than two.
-    let shown = if bindings.len() <= room {
-        bindings.len()
+    let offset = offset.min(bindings.len().saturating_sub(room.max(1)));
+    let remaining = bindings.len() - offset;
+    let shown = if remaining <= room {
+        remaining
     } else {
         room.saturating_sub(1)
     };
@@ -113,7 +125,7 @@ pub fn key_bindings(frame: &mut Frame, area: Rect, bindings: &[(String, &str)]) 
         ..inner
     };
 
-    for (n, (keys, does)) in bindings.iter().take(shown).enumerate() {
+    for (n, (keys, does)) in bindings.iter().skip(offset).take(shown).enumerate() {
         frame.render_widget(
             Fitted::new(
                 vec![Span::raw(format!("{}{keys:<width$}", indent()))],
@@ -124,13 +136,13 @@ pub fn key_bindings(frame: &mut Frame, area: Rect, bindings: &[(String, &str)]) 
         );
     }
 
-    if shown < bindings.len() && room > 0 {
+    if shown < remaining && room > 0 {
         frame.render_widget(
             Fitted::new(
                 vec![Span::raw(format!(
                     "{}{}",
                     indent(),
-                    left_off(bindings.len() - shown)
+                    left_off(remaining - shown)
                 ))],
                 Vec::new(),
                 Vec::new(),
@@ -200,7 +212,7 @@ mod tests {
         assert_eq!(
             bindings_frame(&a_few_bindings(), 60, 5),
             vec![
-                "  ┌Key bindings · press any key to close─────────────────┐  ",
+                "  ┌Key bindings · Up/Down · Esc to close─────────────────┐  ",
                 "  │   Down, j  move down one row                         │  ",
                 "  │   Enter    focus the selected bead's pane in herdr   │  ",
                 "  │   q, ^C    quit                                      │  ",
@@ -215,7 +227,7 @@ mod tests {
     fn the_way_out_is_drawn_before_any_binding_is() {
         let drawn = bindings_frame(&a_few_bindings(), 60, 1);
 
-        assert!(drawn[0].contains("press any key to close"), "{drawn:?}");
+        assert!(drawn[0].contains("Esc to close"), "{drawn:?}");
     }
 
     /// And it is the window's name, so it carries the weight a window's
@@ -254,7 +266,7 @@ mod tests {
         assert_eq!(
             bindings_frame(&a_few_bindings(), 60, 4),
             vec![
-                "  ┌Key bindings · press any key to close─────────────────┐  ",
+                "  ┌Key bindings · Up/Down · Esc to close─────────────────┐  ",
                 "  │   Down, j  move down one row                         │  ",
                 "  │   … 2 more bindings · no room on a screen this short │  ",
                 "  └──────────────────────────────────────────────────────┘  ",
@@ -291,7 +303,7 @@ mod tests {
     fn a_screen_with_one_row_spends_it_on_the_way_out() {
         assert_eq!(
             bindings_frame(&a_few_bindings(), 60, 1),
-            vec!["  ┌Key bindings · press any key to close─────────────────┐  "]
+            vec!["  ┌Key bindings · Up/Down · Esc to close─────────────────┐  "]
         );
     }
 
@@ -303,7 +315,7 @@ mod tests {
         assert_eq!(
             bindings_frame(&a_few_bindings(), 60, 2),
             vec![
-                "  ┌Key bindings · press any key to close─────────────────┐  ",
+                "  ┌Key bindings · Up/Down · Esc to close─────────────────┐  ",
                 "  └──────────────────────────────────────────────────────┘  ",
             ]
         );

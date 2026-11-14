@@ -48,12 +48,12 @@ Each project has its own header; foreign-project rows remain qualified.
 | a | Legacy all/live-agent root filter |
 | v | Cycle Current work, Activity and History |
 | V | Cycle configured custom views |
-| x | Toggle configured disposable fixtures |
-| /, n, N | Search, next match, previous match |
+| x | Toggle records excluded by configured rules |
+| / or Ctrl+F, n, N | Search, next match, previous match |
 | y | Copy the complete bead ID |
 | t | Toggle pane preview |
 | Ctrl-R | Refresh sources |
-| ? | Show current bindings |
+| ? | Show current bindings; Up/Down scroll the list |
 
 The default tree is an ownership hierarchy: each project-qualified bead appears
 once beneath its actual parent. Blocking dependencies do not become additional
@@ -80,12 +80,11 @@ old closed roots reachable. Completed toggling changes rows within scope rather
 than replacing focus with the entire archive. Explicit focus, folds and selection
 survive source refreshes; Home recomputes the default scope.
 
-The row above the shortcuts explains the selected bead's marker (for example,
-`[~]: in progress`). Project and summary selections have no bead status. The
-extra row is omitted on terminals shorter than three rows so the tree remains
-usable. When tree content extends beyond the viewport, centred `...` rows mark
-hidden content above and below. They are scroll indicators, not selectable beads;
-viewports shorter than three rows keep their space for content instead.
+The row at the bottom of the bead list explains the selected marker (for example,
+`[~]: in progress`), above the preview divider or shortcuts. Project and summary
+selections have no bead status. Tiny terminals prioritize content and shortcuts.
+Centered `...` marks overflow; bottom dots share the status row. Sticky project
+headings can share the upper overflow row; see the viewport controls below.
 
 Compact fold arrows retain their branch connectors. Indentation is clipped only
 when needed for title space and only in complete configured steps, so expanded
@@ -149,6 +148,10 @@ ascii = false
 show_ids = false
 compact = true
 colour_brackets = true # false: normal text colour for [ and ], status colour inside
+root_indent = "never" # "single-tree" or "always" removes the project-to-bead step
+search_mode = "jump" # "filter" keeps matches and their ancestor context
+sticky_headers = "active" # "all" pins hidden project headings at both ends; "off" uses dots
+preview_min_height = 6 # content rows, excluding the divider; clamped to leave a bead row
 
 [tui]
 refresh_seconds = 2
@@ -163,9 +166,26 @@ All configured fixture fields must match exactly and the record must be closed.
 `title` and `created_by` are required, plus `description` or `close_reason` (or
 both). Description provenance can cover tests that close through acceptance as
 well as cleanup, without guessing from their close reason. Nothing
-is classified from a loose title substring. Fixture exclusion is view-only,
+is inferred from a loose title substring. Alternatively, opt into a general title
+regex rule, independent of stored status:
+
+```toml
+[hide_titles]
+arkham = '^Disposable'
+```
+
+Patterns use Rust regex-lite syntax, are case-sensitive unless `(?i)` is used,
+and are rejected at load/reload if invalid or empty. A missing project is also
+an error. An unanchored pattern matches anywhere; `^` anchors the start of the
+title. Either a regex rule or an exact provenance rule can exclude a record.
+These are explicit user rules, not automatic classifications. Exclusion is view-only,
 counted and reversible using `x`. Do not confuse these disposable records with
 legitimate fixture-development work. No historical tracker cleanup is performed.
+`z` only changes completed visibility; it never overrides exclusions. Pure
+excluded roots/branches disappear rather than leaving `[fixture hidden]` rows;
+an excluded ancestor needed to reach visible work remains as masked context.
+The `x` override and footer count remain available. Completed work in the
+no-live-agent group follows the same `z` rule as ordinary tree rows.
 
 `colour_brackets = true` (the default) colours the entire three-character status
 marker. With `false`, `[` and `]` inherit normal row text colour while the centre
@@ -289,3 +309,50 @@ See [the validation report](validation-passive-activity.md) for the completed ch
 and their evidence boundaries. `INTENDED-CHANGES.md` is the agreed design and acceptance checklist. Tests cover
 source-to-snapshot correlation alongside renderer and navigation cases; live
 installation checks must be reported separately from mocked/PTY coverage.
+
+
+## Search, pointer and viewport controls
+
+`/` and Ctrl+F open the same editable prompt. Jump mode remains the default.
+With `[row] search_mode = "filter"`, edits narrow the displayed rows while
+retaining ancestors for context. Up/Down moves the selection without ending
+editing in either mode. Enter keeps the result/filter; Esc cancels the current
+prompt. Reopen search and press Enter on an empty query to clear filtering, or press Home/H.
+Full IDs, titles and ordinary case-insensitive text searches remain available.
+
+A leading run of status characters selects **any** of those displayed statuses:
+`?~` means blocked **or** in progress. After whitespace, text is matched against
+the title: `?~ gateway` means one of those states **and** a title containing
+`gateway`. Uppercase derived markers (`T`, `A`, `F`) retain their case and mean
+exactly what the row's current evidence displays, including freshness handling.
+Use `[ ]` (optionally followed by title text) for to-do work, and `x` for stored closed work; search respects the current scope and completed
+visibility. A search does not reveal excluded records; use the explicit `x`
+override first. Unknown activity is `?` on the right of a row, separate from the
+blocked state marker `[?]` at its left.
+
+A click selects a bead. A click on an already selected parent toggles its fold;
+a second click on the same bead within 400 ms sets it as root. Ctrl+click reveals
+one parent root level and selects the clicked bead. These gestures use the same
+root actions as Ctrl+Space and Backspace. The terminal must forward mouse events
+and the Ctrl modifier. Sticky project headings are clickable; overflow dots and
+the status legend are not bead rows.
+
+`root_indent = "single-tree"` removes the project-to-bead indent when exactly one
+project tree is displayed; `"always"` does so for every project. `"never"` keeps
+it. Root bead markers then align with the project dropdown column; deeper
+trunks still descend from the centre of their parent's marker. This affects
+presentation only and does not promote any bead or change ownership.
+
+`sticky_headers = "active"` keeps the current project's name and counts in the
+top overflow row. `"all"` pins hidden project headers above and below the visible
+content; they join the ordinary list when reached. At tiny heights headers yield
+to at least one content row. `"off"` retains a plain top overflow indicator.
+The concise selected-status description stays at the bottom of the bead band,
+above the preview divider (or above the shortcuts when the preview is hidden).
+Bottom overflow dots share that row, and disappear when the end is visible.
+
+Compact right-hand labels use single spaces, place the completion fraction last,
+and show unknown activity as `?` or `model · ?`. Details retain the full evidence.
+`preview_min_height` sets the minimum preview content rows; a short tree can
+leave it more room, and a tiny terminal clamps it to preserve the tree. Delimiter
+dragging is not implemented; resizing is controlled through configuration.

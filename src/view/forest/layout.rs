@@ -730,7 +730,24 @@ impl<'a> Layout<'a> {
         }
         let children = match kind {
             GroupKind::HiddenTrees => {
-                let roots = hidden_trees(self.snapshot, project.as_deref());
+                let roots: Vec<_> = hidden_trees(self.snapshot, project.as_deref())
+                    .into_iter()
+                    .filter(|tree| {
+                        !self.row.compact
+                            || tree.beads.is_empty()
+                            || child_visible(
+                                tree,
+                                0,
+                                &[],
+                                true,
+                                Visibility {
+                                    fixtures: self.show_fixtures,
+                                    completed: self.show_completed,
+                                    preserve: self.preserve_completed,
+                                },
+                            )
+                    })
+                    .collect();
                 let count = roots.len();
                 roots
                     .into_iter()
@@ -1613,8 +1630,9 @@ fn child_visible(
     visibility: Visibility<'_>,
 ) -> bool {
     let bead = &tree.beads[at];
-    let fixture =
-        visibility.fixtures || !bead.disposable_fixture || descendant_product(tree, at, above);
+    let fixture = visibility.fixtures
+        || !bead.disposable_fixture
+        || descendant_visible_product(tree, at, above, visibility);
     let complete = !compact
         || visibility.completed
         || !bead.status.is_finished()
@@ -1771,6 +1789,23 @@ fn children_of(
     )
 }
 
+fn descendant_visible_product(
+    tree: &Tree,
+    at: usize,
+    above: &[usize],
+    visibility: Visibility<'_>,
+) -> bool {
+    let path = with(at, above);
+    links_below(tree, at, above).into_iter().any(|link| {
+        let node = &tree.beads[link.bead];
+        (!node.disposable_fixture
+            && (visibility.completed
+                || !node.status.is_finished()
+                || visibility.preserve.is_some_and(|key| node.is(key))))
+            || descendant_visible_product(tree, link.bead, &path, visibility)
+    })
+}
+
 fn descendant_product(tree: &Tree, at: usize, above: &[usize]) -> bool {
     let path = with(at, above);
     links_below(tree, at, above).into_iter().any(|link| {
@@ -1782,6 +1817,9 @@ impl Layout<'_> {
     /// The scope, where the directory chose it. A scope the reader typed is
     /// silent, and a run reading everything has nothing to say.
     fn say_what_the_directory_chose(&self, lines: &mut Vec<Node>) {
+        if self.row.compact {
+            return;
+        }
         if let config::Scope::Directory { project, .. } = &self.snapshot.scope {
             lines.push(Node::drawn(
                 Line {

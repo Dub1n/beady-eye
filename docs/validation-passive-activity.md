@@ -178,3 +178,47 @@ Both all-target and non-test Clippy checks passed with warnings denied. Formatti
 diff/source scans, package verification and the canonical release build passed.
 The installed linked-plugin binary reports 0.42.2 and matches that release build.
 No fresh live Herdr-pane, macOS or full Nix validation is claimed.
+
+
+## 0.43.0 tree controls, filtering and viewport follow-up
+
+Implemented the checked items in the tree/search follow-up in
+[INTENDED-CHANGES.md](../INTENDED-CHANGES.md). [AGENTS.md](../AGENTS.md) now makes
+maintaining that checklist, the user guide and [PROPOSED-PRS.md](../PROPOSED-PRS.md)
+part of future changes. The proposal catalogue records extraction boundaries and
+readiness requirements; no contribution has been submitted upstream.
+
+The final full locked Cargo suite passed **2,784 tests, zero failed, 3 ignored
+across 44 reported targets**, including the focused rendering regression for
+unknown activity without a model (`? 1/4`) and with one (`Luna · ? 1/4`). Tests use invented
+records and the existing draining terminal driver. Coverage includes:
+
+- Regex exclusions across stored statuses, invalid/empty patterns, explicit
+  override and independence from completed visibility. Hidden matches cannot
+  leave unrelated ancestor rows in a live filter.
+- Completed visibility inside the no-live-agent group, preserving History root
+  discovery and the complete acquired source graph.
+- Status-prefix OR queries combined with title text by AND, retained uppercase
+  marker case, ordinary case-insensitive text, and clearing filtered ancestry.
+- Real terminal Ctrl+F, editable Up/Down navigation, Enter retaining a filter and
+  keybinding help scrolling without dismissal.
+- Both sticky heading modes and plain overflow, source-row hit testing across
+  scroll offsets, tiny heights, last-row selection and root marker alignment.
+- Preview minimum clamping, selected-parent folding, double-click set-root and
+  Ctrl+click parent-root selection.
+- Updated real terminal status-legend checks at 30/40/60/80 columns, retaining
+  full IDs in details and the separate dependency/ownership views.
+
+Formatting, Clippy with warnings denied, source scans, package verification and
+the canonical release installation are recorded separately from CI. The source
+scans are the extracted upstream bounded-walk, module-concern and palette checks;
+they are not the full Nix suite. Nix is unavailable locally. No new macOS or live
+Herdr-pane execution is claimed, and the user's running pane was not restarted.
+Empty GitHub checks must not be read as a CI pass.
+
+The installed binary is built from this checkout with `sh herdr/build.sh` and
+reports 0.43.0. Reopening the viewer loads it. The local configuration was backed
+up before translating numeric/boolean draft values to the documented enum values
+and adding the user's explicit title exclusion; private config values and data
+are not included here. Delimiter dragging is not implemented: the preview minimum
+is configurable, and its read sizing follows the actual rendered band.

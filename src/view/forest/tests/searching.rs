@@ -1171,3 +1171,69 @@ const NAMED_INSIDE_A_LONGER_ID: &str = r#"[
    "dependencies":[{"depends_on_id":"dun-6.2","type":"parent-child"}],
    "priority":2,"issue_type":"task"}
 ]"#;
+
+#[test]
+fn status_prefixes_are_or_and_title_is_and_without_changing_ordinary_text_search() {
+    use crate::model::types::Status;
+    let mut bead = tree_of("dunwich", DUNWICH).beads.remove(0);
+    bead.title = "Gateway refunds".into();
+    for (status, queries) in [
+        (
+            Status::Blocked,
+            vec![
+                ("?", true),
+                ("?~", true),
+                ("?~ refunds", true),
+                ("?~ release", false),
+                ("~", false),
+            ],
+        ),
+        (
+            Status::InProgress,
+            vec![("?~", true), ("?~ ReFuNdS", true), ("?", false)],
+        ),
+        (
+            Status::Open,
+            vec![("[ ]", true), ("[ ] gateway", true), ("[ ] release", false)],
+        ),
+        (Status::Closed, vec![("x", true), ("?~", false)]),
+        (Status::Hooked, vec![("<", true), ("< gateway", true)]),
+    ] {
+        bead.status = status;
+        for (query, expected) in queries {
+            assert_eq!(
+                super::super::search::matches_query(&bead, query),
+                expected,
+                "{query}: {:?}",
+                bead.status
+            );
+        }
+        assert!(super::super::search::matches_query(&bead, "GATEWAY"));
+    }
+}
+
+#[test]
+fn search_filter_restores_full_tree_and_hides_nonmatching_branches() {
+    let mut forest = flatten_compact(snapshot());
+    forest.apply(Action::ExpandForest);
+    let before = forest.source.collected.clone();
+    let drawn_before = sketch(&forest);
+    forest.filter_search("true the mount");
+    assert!(drawn_here(&forest, "true the mount"));
+    assert!(!drawn_here(&forest, "re-fit the ferry"));
+    assert_eq!(forest.source.collected, before);
+    forest.filter_search("");
+    assert_eq!(sketch(&forest), drawn_before);
+}
+
+#[test]
+fn uppercase_status_queries_survive_the_jump_search_parser() {
+    let rows = r#"[{"id":"dun-1","title":"Invented planning record","status":"pinned"}]"#;
+    let mut forest = flatten_compact(gather(
+        vec![tree_of("dunwich", rows)],
+        Vec::new(),
+        Filter::All,
+    ));
+    assert!(matches!(forest.seek_here("P"), Landed::On { .. }));
+    assert!(matches!(forest.seek_here("P planning"), Landed::On { .. }));
+}

@@ -85,6 +85,15 @@ pub fn build_tree(
         .map(|project| (project, cfg.badges_for_project(project)))
         .collect();
     let project_of = |at: usize| assembled.external.get(&at).map_or(project, String::as_str);
+    let hide_titles: BTreeMap<_, _> = cfg
+        .hide_titles
+        .iter()
+        .filter_map(|(project, expression)| {
+            regex_lite::Regex::new(expression)
+                .ok()
+                .map(|pattern| (project.as_str(), pattern))
+        })
+        .collect();
     let beads: Vec<Node> = assembled
         .beads
         .iter()
@@ -132,10 +141,13 @@ pub fn build_tree(
             });
             Node {
                 activity: None,
-                disposable_fixture: cfg
-                    .fixture_filters
+                disposable_fixture: hide_titles
                     .get(own)
-                    .is_some_and(|filter| filter.matches(bead)),
+                    .is_some_and(|pattern| pattern.is_match(&bead.title))
+                    || cfg
+                        .fixture_filters
+                        .get(own)
+                        .is_some_and(|filter| filter.matches(bead)),
                 project: own.to_string(),
                 id: bead.id.clone(),
                 title: bead.title.clone(),

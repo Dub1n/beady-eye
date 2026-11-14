@@ -1,6 +1,6 @@
 # Intended changes: compact trees and passive agent activity
 
-Status: implemented in this fork. This document remains the agreed design and
+Status: implemented in this fork (including the 0.43.0 follow-up checklist). This document remains the agreed design and
 acceptance checklist. See [the fork guide](docs/passive-activity.md) for actual
 configuration and controls, and [the validation report](docs/validation-passive-activity.md)
 for tested coverage and platform/source limits. Upstream screenshots and optional
@@ -163,8 +163,8 @@ facts appear beside them or in details. Contradictory evidence may add `[!]` as 
 warning; it must not silently rewrite their stored meaning.
 
 For in-progress beads, refine the marker using the matching current attempt.
-Use `[~]` plus an explicit “activity unknown” qualifier when liveness is not
-established. Do not equate a missing runtime file or stale observation with
+Use `[~]` plus a compact `?` qualifier on the right (explained as activity unknown
+in details) when liveness is not established. Do not equate a missing runtime file or stale observation with
 working, failed or cancelled execution.
 
 A completed task proves execution ended, not that it succeeded or is acceptable.
@@ -312,3 +312,28 @@ Suggested implementation order:
 All committed examples and test fixtures must be invented, in accordance with
 [CONTRIBUTING.md](CONTRIBUTING.md). Do not publish local task captures, sessions,
 paths, private project descriptions or logs as implementation fixtures.
+
+## Tree interaction and search follow-up
+
+The following checklist tracks the next increment; earlier implemented sections
+remain the baseline. Configuration examples use invented projects.
+
+- [x] Root indentation: `never`, `single-tree`, `always` modes for suppressing
+  the project-to-bead indent while preserving nested connector alignment.
+- [x] Scroll keybinding help with Up/Down without closing it.
+- [x] General opt-in regex title exclusions; suppress excluded placeholders
+  independently of completed visibility, retain explicit exclusion override.
+- [x] Hide completed work consistently in trees without live agents.
+- [x] Search: default jump mode plus optional live filter, Up/Down while editing,
+  Ctrl+F alias, status-prefix OR matching combined with title text by AND.
+- [x] Remove redundant directory-scope explanatory row from compact views.
+- [x] Keep concise selected-status legend at the bottom of the bead band,
+  sharing its row with bottom overflow dots.
+- [x] Mouse: double-click sets root; Ctrl+click goes up one root level and selects
+  the clicked bead; click an already selected parent toggles its fold.
+- [x] Sticky project headers with counts and overflow dots: configurable active
+  header or all hidden headers at top/bottom, respecting tiny terminal capacity.
+- [x] Compact right labels: unknown activity `?`, separator only after a model,
+  single spaces and completion fraction last.
+- [x] Configurable minimum preview height, bounded by available terminal space.
+  Optional delimiter dragging only if it fits the existing event architecture.

@@ -224,6 +224,19 @@ impl Drawn {
     }
 
     /// How many rows the forest draws.
+    /// Project header positions without materializing any lazy subtrees.
+    pub fn project_headers(&self) -> Vec<usize> {
+        let mut at = 0;
+        let mut headers = Vec::new();
+        for node in &self.top {
+            if matches!(node.line.content, Content::Project(_)) {
+                headers.push(at);
+            }
+            at += node.rows;
+        }
+        headers
+    }
+
     pub fn len(&self) -> usize {
         self.rows
     }

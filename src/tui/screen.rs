@@ -26,7 +26,7 @@ use crate::config::{self, Background, Config, Crop};
 use crate::model::join::BeadKey;
 use crate::model::snapshot::Snapshot;
 use crate::model::types::PaneKey;
-use crate::view::bindings::key_bindings;
+use crate::view::bindings::key_bindings_from;
 use crate::view::draw::TailBand;
 use crate::view::forest::{self, Forest};
 use crate::view::lines::Place;
@@ -139,6 +139,8 @@ impl Retiring {
 /// tty and none of this does.
 struct Shown {
     forest: Forest,
+    bindings_offset: usize,
+    last_click: Option<(BeadKey, std::time::Instant)>,
     panes: Box<dyn Panes>,
     /// Where the terminal's clipboard is written: the terminal itself, by
     /// escape sequence, so the write travels the way every other byte `bdi`
@@ -254,6 +256,8 @@ impl Shown {
         let mut forest = forest::flatten(snapshot);
         forest.laid_out_to(drawing.layout.clone());
         let mut shown = Self {
+            bindings_offset: 0,
+            last_click: None,
             tail: tail::tail(&forest),
             tailing: tail::target(&forest).pane().cloned(),
             tail_band: TailBand::Shown,
@@ -576,26 +580,76 @@ impl Shown {
     /// than left on the last frame's, so a pointer is answered for the screen
     /// it pointed at whatever has been drawn since.
     fn clicked(&mut self, screen: Rect, row: u16) -> bool {
-        let bands = draw::regions_with_status(
+        let bands = draw::regions_for_layout(
             screen,
             self.forest.lines().len(),
             self.tail_band,
-            self.drawing.layout.compact,
+            &self.drawing.layout,
         );
         self.forest.fit(bands.forest.height as usize);
 
-        match draw::line_at(
-            bands.forest,
-            self.forest.from(),
-            self.forest.lines().len(),
-            row,
-        ) {
+        let at = draw::forest_line_at(bands.forest, &self.forest, &self.drawing.layout, row);
+        let key = at
+            .and_then(|at| self.forest.lines().get(at))
+            .and_then(|line| line.bead())
+            .cloned();
+        let now = std::time::Instant::now();
+        if let Some(key) = key {
+            let double = self.last_click.as_ref().is_some_and(|(old, time)| {
+                *old == key && now.duration_since(*time) <= Duration::from_millis(400)
+            });
+            self.last_click = Some((key, now));
+            if double {
+                self.last_click = None;
+                return self.apply(Action::RootSelected);
+            }
+        } else {
+            self.last_click = None;
+        }
+        match draw::forest_line_at(bands.forest, &self.forest, &self.drawing.layout, row) {
+            Some(at)
+                if at == self.forest.selected_line()
+                    && self.forest.lines().get(at).is_some_and(|line| {
+                        line.folded.is_some()
+                            && matches!(line.content, crate::view::lines::Content::Bead(_))
+                    }) =>
+            {
+                self.apply(Action::ToggleFold)
+            }
             Some(at) => self.select(at),
             // The tail is an echo of a pane and the key row is a legend.
             // Neither holds anything the selection could sit on, and a row
             // past the last line of the forest holds nothing at all.
             None => false,
         }
+    }
+
+    fn ctrl_clicked(&mut self, screen: Rect, row: u16) -> bool {
+        let shown = self;
+        let bands = draw::regions_for_layout(
+            screen,
+            shown.forest.lines().len(),
+            shown.tail_band,
+            &shown.drawing.layout,
+        );
+        let Some(at) =
+            draw::forest_line_at(bands.forest, &shown.forest, &shown.drawing.layout, row)
+        else {
+            return false;
+        };
+        let key = shown
+            .forest
+            .lines()
+            .get(at)
+            .and_then(|line| line.bead())
+            .cloned();
+        let Some(key) = key else {
+            return false;
+        };
+        shown.last_click = None;
+        shown.forest.apply(Action::RootUp);
+        shown.forest.go_to(&key);
+        shown.moved(true)
     }
 
     /// Go to the bead named by the reference the bead window drew on one row
@@ -682,14 +736,19 @@ impl Shown {
             }
             Typing::Abandoned => {
                 if let Some(prompt) = self.sought.take() {
-                    self.forest.restore(&prompt.origin);
+                    self.forest.cancel_search(&prompt.origin);
                 }
                 self.said = None;
                 self.moved(true)
             }
             Typing::Sought => {
+                let clear = prompt.query.typed().is_empty()
+                    && self.drawing.layout.search_mode == crate::view::row::SearchMode::Filter;
+                if clear {
+                    self.forest.filter_search("");
+                }
                 self.sought = None;
-                true
+                self.moved(true)
             }
         }
     }
@@ -731,6 +790,9 @@ impl Shown {
         let Some(prompt) = &self.sought else {
             return false;
         };
+        if self.drawing.layout.search_mode == crate::view::row::SearchMode::Filter {
+            self.forest.filter_search(prompt.query.typed());
+        }
         if prompt.query.typed().is_empty() {
             self.forest.restore(&prompt.origin);
             self.said = None;
@@ -1114,12 +1176,7 @@ fn paint(
     lapsed: &[String],
     now: DateTime<Utc>,
 ) -> u16 {
-    let bands = draw::regions_with_status(
-        frame.area(),
-        forest.lines().len(),
-        tail_band,
-        layout.compact,
-    );
+    let bands = draw::regions_for_layout(frame.area(), forest.lines().len(), tail_band, layout);
     // A bead window covers the forest; resizing that window must not move
     // the viewport the reader will return to.
     if !matches!(&over, Over::Bead(_)) {
@@ -1127,21 +1184,12 @@ fn paint(
     }
     draw::draw(frame, bands, forest, layout, collecting, lapsed, now, foot);
     draw::draw_tail(frame, bands.tail, tail);
-    if layout.compact && frame.area().height >= 3 {
-        if let Some(status) = draw::selected_status(forest) {
-            frame.render_widget(
-                ratatui::text::Line::raw(status),
-                Rect {
-                    y: bands.keys.y - 1,
-                    height: 1,
-                    ..bands.keys
-                },
-            );
-        }
-    }
     match over {
         Over::Nothing => {}
-        Over::Bindings => key_bindings(frame, frame.area(), &bindings()),
+        Over::Bindings => crate::view::bindings::key_bindings(frame, frame.area(), &bindings()),
+        Over::ScrolledBindings(offset) => {
+            key_bindings_from(frame, frame.area(), &bindings(), offset)
+        }
         Over::Bead(show) => {
             if let Some(node) = show::selected(forest) {
                 let mentioned = show::mentioned(forest, node);
@@ -1161,10 +1209,7 @@ fn paint(
             }
         }
     }
-    draw::regions(frame.area(), forest.lines().len(), TailBand::Shown)
-        .tail
-        .height
-        .saturating_sub(1)
+    bands.tail.height.saturating_sub(1)
 }
 
 /// The window over the forest, where one is up, with what drawing it needs:
@@ -1172,6 +1217,7 @@ fn paint(
 enum Over<'a> {
     Nothing,
     Bindings,
+    ScrolledBindings(usize),
     Bead(&'a mut Show),
 }
 
@@ -1183,7 +1229,7 @@ enum Over<'a> {
 fn keys_under(over: &Over<'_>, forest: &Forest) -> Vec<String> {
     match over {
         Over::Bead(_) => bead_key_rows(),
-        Over::Nothing | Over::Bindings => {
+        Over::Nothing | Over::Bindings | Over::ScrolledBindings(_) => {
             let state = forest.footer_state();
             let plain = forest_key_rows(forest.is_focused());
             let mut rows: Vec<_> = plain.iter().map(|row| format!("{row}   {state}")).collect();
@@ -1287,6 +1333,23 @@ impl<B: PutBack> View for Screen<B> {
         self.shown.pasted(text)
     }
 
+    fn scroll_bindings(&mut self, motion: Motion) -> bool {
+        let area = self.terminal.get_frame().area();
+        let table = bindings();
+        let room = crate::view::bindings::bindings_block()
+            .inner(crate::view::bindings::bindings_window(area, &table))
+            .height as usize;
+        let maximum = table.len().saturating_sub(room.max(1));
+        let offset = &mut self.shown.bindings_offset;
+        let was = *offset;
+        *offset = match motion {
+            Motion::NextRow => offset.saturating_add(1).min(maximum),
+            Motion::PreviousRow => offset.saturating_sub(1),
+            _ => *offset,
+        };
+        was != *offset
+    }
+
     fn scroll(&mut self, motion: Motion) -> bool {
         self.shown.scroll(motion)
     }
@@ -1320,6 +1383,11 @@ impl<B: PutBack> View for Screen<B> {
         self.shown.clicked(screen, row)
     }
 
+    fn ctrl_clicked(&mut self, row: u16) -> bool {
+        let screen = self.terminal.get_frame().area();
+        self.shown.ctrl_clicked(screen, row)
+    }
+
     fn clicked_bead(&mut self, row: u16) -> Landed {
         let screen = self.terminal.get_frame().area();
         self.shown.clicked_bead(screen, row)
@@ -1338,11 +1406,18 @@ impl<B: PutBack> View for Screen<B> {
             sought,
             drawing,
             room,
+            bindings_offset,
             ..
         } = &mut self.shown;
         let over = match showing {
             Showing::Forest | Showing::Searching => Over::Nothing,
-            Showing::Bindings => Over::Bindings,
+            Showing::Bindings => {
+                if *bindings_offset == 0 {
+                    Over::Bindings
+                } else {
+                    Over::ScrolledBindings(*bindings_offset)
+                }
+            }
             Showing::Bead => Over::Bead(show),
         };
         let keys = keys_under(&over, forest);
@@ -1378,6 +1453,7 @@ impl<B: PutBack> View for Screen<B> {
 mod tests {
     mod driven;
     mod fold_keys;
+    mod mouse;
     mod sessions;
 
     use super::*;
@@ -1567,7 +1643,7 @@ mod tests {
                 "  o         fold or unfold the selected node",
                 "  a         show every tree in the collected snapshot",
                 "  z         show or hide completed beads within the current scope",
-                "  x         show or hide configured disposable fixture records",
+                "  x         show or hide records excluded by configured rules",
                 "  ?         show these key bindings",
                 "  b         switch ownership tree and dependency graph",
                 "  r         list only ready beads, in the forest or a view; again for all",
@@ -1578,7 +1654,7 @@ mod tests {
                 "  F         draw the selected bead as the only root, or put the forest back",
                 "  ^Space    set the selected bead as the displayed root",
                 "  t         hide or show the pane's output under the forest",
-                "  /         find part of a bead's id or title, wherever the forest draws it",
+                "  /, ^F     find part of a bead's id or title, wherever the forest draws it",
                 "  n, ^G     go to the next bead matching the search",
                 "  N, ^T     go to the one before it",
                 "  q, ^C     quit",

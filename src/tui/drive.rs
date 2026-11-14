@@ -33,6 +33,7 @@ pub(super) enum Event {
     Key(KeyEvent),
     /// A left click, on the row of the screen it landed on.
     Clicked(u16),
+    CtrlClicked(u16),
     /// A wheel notch, and which way it turned.
     Scrolled(Notch),
     /// Text the reader pasted, all of it.
@@ -245,6 +246,10 @@ pub(super) trait View {
     /// changed. The selection under it does not move: the view is what the
     /// motion is about while a bead is up, and the loop is what knows one is.
     fn scroll(&mut self, motion: Motion) -> bool;
+    /// Scroll help while keeping its overlay open.
+    fn scroll_bindings(&mut self, _motion: Motion) -> bool {
+        false
+    }
 
     /// Move the forest's view one notch of the wheel, reporting whether the
     /// screen has changed. The selection does not move: a notch asks for the
@@ -290,6 +295,10 @@ pub(super) trait View {
     /// is the loop's other seam: the loop knows where the pointer was and
     /// nothing about what is drawn there.
     fn clicked(&mut self, row: u16) -> bool;
+    /// Go up one displayed root while selecting the pointer's bead.
+    fn ctrl_clicked(&mut self, row: u16) -> bool {
+        self.clicked(row)
+    }
 
     /// Go to the bead a reference drawn on one row of the bead window names,
     /// reporting what the click came to.
@@ -567,12 +576,16 @@ fn sleeps_for(
 /// moves no fold and no selection.
 fn keeps_what_is_open(event: &Event, showing: Showing) -> bool {
     match event {
-        Event::Key(_) | Event::Clicked(_) if showing == Showing::Searching => false,
+        Event::Key(_) | Event::Clicked(_) | Event::CtrlClicked(_)
+            if showing == Showing::Searching =>
+        {
+            false
+        }
         Event::Key(key) => !matches!(
             action(*key),
             Some(Action::NextMatch | Action::PreviousMatch | Action::Search)
         ),
-        Event::Clicked(_) => true,
+        Event::Clicked(_) | Event::CtrlClicked(_) => true,
         _ => false,
     }
 }
@@ -591,15 +604,21 @@ fn answered(
     // on the foot after the first press has taken it off, not before.
     let pressed = matches!(
         event,
-        Event::Key(_) | Event::Clicked(_) | Event::Scrolled(_)
+        Event::Key(_) | Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
     ) && view.pressed();
     if keeps_what_is_open(&event, *showing) {
         view.keep_what_is_open();
     }
     let changed = match event {
-        // Any key at all, because a reader who opened the bindings by
-        // accident must not have to find the one key that closes them.
+        // Arrows scroll help; other keys dismiss the overlay.
         Event::Key(key) if *showing == Showing::Bindings => {
+            if let Some(motion) = match key.code {
+                ratatui::crossterm::event::KeyCode::Down => Some(Motion::NextRow),
+                ratatui::crossterm::event::KeyCode::Up => Some(Motion::PreviousRow),
+                _ => None,
+            } {
+                return Some(view.scroll_bindings(motion));
+            }
             if action(key) == Some(Action::Home) {
                 view.apply(Action::Home);
             }
@@ -686,6 +705,9 @@ fn answered(
             }
             Some(step) => view.typing(step),
             None => match action(key) {
+                Some(Action::Move(motion @ (Motion::NextRow | Motion::PreviousRow))) => {
+                    view.apply(Action::Move(motion))
+                }
                 Some(Action::Quit) => return None,
                 _ => false,
             },
@@ -735,14 +757,18 @@ fn answered(
         // A click or a notch takes the bindings away and does no more,
         // for the same reason a key does: the window is over the forest,
         // so the rows under the pointer are rows nobody can see.
-        Event::Clicked(_) | Event::Scrolled(_) if *showing == Showing::Bindings => {
+        Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
+            if *showing == Showing::Bindings =>
+        {
             *showing = Showing::Forest;
             true
         }
         // And it leaves the prompt, which is a reader looking away from what
         // they were typing. The forest goes back to how it stood at `/`, as
         // Esc puts it back: what they typed was never confirmed.
-        Event::Clicked(_) | Event::Scrolled(_) if *showing == Showing::Searching => {
+        Event::Clicked(_) | Event::CtrlClicked(_) | Event::Scrolled(_)
+            if *showing == Showing::Searching =>
+        {
             *showing = Showing::Forest;
             view.typing(Typing::Abandoned);
             true
@@ -763,6 +789,8 @@ fn answered(
         // distance: a reader turning the wheel is making one gesture and it
         // covers the same ground wherever they are looking.
         Event::Scrolled(notch) if *showing == Showing::Bead => view.scrolled_bead(notch),
+        Event::CtrlClicked(_) if *showing == Showing::Bead => false,
+        Event::CtrlClicked(row) => view.ctrl_clicked(row),
         Event::Clicked(row) => view.clicked(row),
         Event::Scrolled(notch) => view.scrolled(notch),
         Event::Resize => true,

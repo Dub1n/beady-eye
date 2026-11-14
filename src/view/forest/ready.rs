@@ -48,9 +48,15 @@ pub(super) fn lay_out(
     rooted: &[Rooted],
     unblocking: &BTreeSet<BeadKey>,
     layout: &row::Layout,
+    filter: (&str, bool),
 ) -> Drawn {
+    let (query, show_excluded) = filter;
     let (covered, unread) = covered(snapshot, rooted);
-    let reached = each_once(&covered);
+    let mut reached = each_once(&covered);
+    reached.retain(|_, (bead, ..)| {
+        (show_excluded || !bead.disposable_fixture)
+            && (query.is_empty() || super::search::matches_query(bead, query))
+    });
     let sections = match list {
         List::Ready => {
             let [in_progress, ready] = sections(&reached);
