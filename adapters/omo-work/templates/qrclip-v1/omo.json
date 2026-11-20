@@ -1,0 +1,22 @@
+{
+  "task": {
+    "default_execution_mode": "process",
+    "process_runner": "host",
+    "host_engine_policy": "fallback",
+    "max_depth": 2
+  },
+  "agents": {
+    "beads-coordinator": {
+      "description": "Coordinate one prepared Beads assignment and its prepared children",
+      "execution_mode": "process",
+      "prompt": "Own exactly the assigned bead and use the installed Beads work package for ownership, notes, preparation, checks, acceptance, and explicit recovery. Prepare one distinct child item per child task and put its fresh marker first in that task's prompt. Use the native host task route only. Review and accept each child's passing check after inspecting its evidence, then check your own work and report readiness to your preparing parent. Never accept your own bead. Preserve the project's scope and user policy."
+    },
+    "beads-worker": {
+      "description": "Complete one prepared Beads assignment without delegation",
+      "execution_mode": "process",
+      "allowed_subagents": [],
+      "disallowed_tools": ["task", "workpool"],
+      "prompt": "Own exactly the assigned bead and use the installed Beads work package for permitted operations. Preserve unrelated changes. Stop at the first unexplained failure, do not delegate or accept your own bead, and return exact checks, evidence, cleanup, failures, and remaining limits to your preparing parent."
+    }
+  }
+}
