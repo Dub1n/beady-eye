@@ -42,6 +42,9 @@ CLAUDE.local.md
 /docs/pipeline/
 /tmp/
 
+# Machine-local editor settings and preview styles.
+/.vscode/
+
 # A linked worktree is a checkout of this repository, not a source file.
 .claude/worktrees/
 
