@@ -312,6 +312,9 @@ impl Counts {
                         for worker in workers {
                             if worker.presence_state()
                                 != crate::collect::omo::PresenceState::Unknown
+                                || (worker.attempt_id == activity.attempt_id
+                                    && worker.execution_state()
+                                        == crate::collect::omo::ExecutionState::Active)
                             {
                                 let id = worker
                                     .child_session

@@ -6,6 +6,46 @@ use terminal::shims::ShimmedTracker;
 use terminal::{a_home_naming_one_project_settled, ENTER_ALTERNATE_SCREEN};
 
 #[test]
+fn active_headless_worker_counts_without_an_observer() {
+    use serde_json::json;
+    use std::fs;
+    let home = a_home_naming_one_project_settled("legacy-live-tree", "");
+    let tasks = home.join("native-tasks");
+    fs::create_dir(&tasks).unwrap();
+    let cfg = home.join(".config/beady-eye/config.toml");
+    let mut config = fs::read_to_string(&cfg).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\n",
+        tasks.display()
+    ));
+    fs::write(cfg, config).unwrap();
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(&json!([{
+        "id":"ark-legacy","title":"Inventory","status":"in_progress","priority":2,"issue_type":"task",
+        "metadata":{"qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                    "qrclipDispatch":{"attemptId":"attempt-a","taskId":"st_legacy","childSession":"child-a"}}
+    }]).to_string());
+    for (status, expected_count) in [("running", 1), ("completed", 0)] {
+        fs::write(tasks.join("st_legacy.json"), json!({"task_id":"st_legacy","status":status,
+            "parent_session_id":"owner-a","child_session_id":"child-a","updated_at":chrono::Utc::now()}).to_string()).unwrap();
+        let result = terminal::bdi_on_pipes(&home)
+            .args(["--all", "--json"])
+            .envs(tracker.environment())
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{:?}", result.stderr);
+        let snapshot: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        let tree = &snapshot["trees"][0];
+        assert_eq!(
+            tree["nodes"][0]["agent_live"],
+            expected_count == 1,
+            "{status}"
+        );
+        assert_eq!(tree["counts"]["live_agents"], expected_count, "{status}");
+    }
+}
+
+#[test]
 fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
     for colour_brackets in [true, false] {
         for cols in [30, 40, 60, 80] {
