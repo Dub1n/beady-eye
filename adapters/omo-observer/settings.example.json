@@ -1,0 +1,7 @@
+{
+  "project": "orchard",
+  "projectDirectory": "/work/examples/orchard",
+  "taskDirectory": "/work/examples/orchard/tasks",
+  "directory": "/home/example/.local/state/beady-eye/observations/orchard",
+  "workPolicyExecutable": "/opt/beady-eye/bin/bdi-beads-work"
+}
