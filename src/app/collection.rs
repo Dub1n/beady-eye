@@ -80,6 +80,8 @@ pub enum Asked {
     /// Every one is answered, because the loop shows no snapshot while one
     /// is unanswered.
     Focused(BTreeSet<BeadKey>),
+    /// Rebuild from the current pane listing without requesting tracker reads.
+    RefreshPanes,
 }
 
 /// A read that has been asked for and has not come back: what it is to
@@ -2777,6 +2779,38 @@ work_policy_executable = {executable:?}
             snap.speaks_until,
             BTreeMap::from([("dunwich".to_string(), when_it_is_due())])
         );
+    }
+
+    #[test]
+    fn a_redraw_reads_updated_pane_captions_without_a_tracker_refresh() {
+        let cfg = one_project();
+        let trackers = dunwich();
+        let provider = |caption| {
+            Provider::holding(vec![
+                titled(pane("w:p1", DUNWICH, PaneStatus::Working), caption),
+                titled(pane("w:p9", DUNWICH, PaneStatus::Idle), caption),
+            ])
+        };
+        let mut standing = Collection::default();
+        let before = standing.collect(
+            &cfg,
+            &provider("first goal"),
+            &trackers,
+            &Wanted::Everything,
+            Filter::All,
+            now(),
+        );
+        let tracker_calls = asked_of(&trackers, "dunwich");
+        let after = standing.redraw(&cfg, &provider("next goal"), &trackers, Filter::All, now());
+        assert_eq!(asked_of(&trackers, "dunwich"), tracker_calls);
+        for (snapshot, expected) in [(&before, "first goal"), (&after, "next goal")] {
+            let joined = node(tree_of(snapshot, "dunwich"), "dun-7.1")
+                .agent
+                .as_ref()
+                .expect("joined pane");
+            assert_eq!(joined.title.as_deref(), Some(expected));
+            assert_eq!(snapshot.unattributed[0].title.as_deref(), Some(expected));
+        }
     }
 
     /// A heartbeat renews a lease without moving the fingerprint, so a read
