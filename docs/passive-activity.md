@@ -65,7 +65,7 @@ Each project has its own header; foreign-project rows remain qualified.
 | b | Switch ownership tree / dependency graph |
 | r | Existing ready list and what its work unblocks |
 | z | Toggle completed records within scope |
-| a | Legacy all/live-agent root filter |
+| a | Temporarily show all trees; press again to restore the previous scope |
 | v | Cycle Current work, Activity and History |
 | V | Cycle configured custom views |
 | x | Toggle records excluded by configured rules |
@@ -96,9 +96,17 @@ presentations.
 Current work includes roots with open, in-progress, blocked, hooked or other
 unfinished descendants, retaining ancestry. Activity retains work in execution,
 prepared or blocked states and finished work awaiting disposition. History makes
-old closed roots reachable. Completed toggling changes rows within scope rather
-than replacing focus with the entire archive. Explicit focus, folds and selection
-survive source refreshes; Home recomputes the default scope.
+old closed roots reachable. Turning completed work off hides already-completed
+leaves within the current scope; selecting one does not pin it in the tree.
+Explicit focus and folds survive source refreshes; a selected bead that closes
+during a refresh can stay visible until Home or until you hide completed work.
+Home recomputes the default scope.
+
+Pane titles refresh even when an external producer has stood down tracker
+polling. If no other collection refreshes them, the viewer requests pane
+metadata after 30 seconds without asking for another tracker read or changing
+focus. Preview content starts at the left edge, preserving indentation from
+the source pane itself.
 
 The row at the bottom of the bead list explains the selected marker (for example,
 `[~]: in progress`), above the preview divider or shortcuts. Project and summary

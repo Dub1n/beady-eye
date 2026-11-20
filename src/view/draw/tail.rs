@@ -83,12 +83,11 @@ pub fn draw_tail(frame: &mut Frame, area: Rect, band: Band<'_>) {
     }
 }
 
-/// One of the pane's own rows, indented like the phrases and cut to the
+/// One of the pane's own rows, cut to the
 /// band's width. The row keeps every colour and attribute the pane gave it,
 /// which is what tells it from a row `bdi` wrote.
 fn as_the_pane_drew_it(said: Line<'static>) -> Fitted {
-    let mut spans = vec![Span::raw(indent())];
-    spans.extend(said.spans);
+    let mut spans = said.spans;
     // Pane captures are often padded to the source terminal width. Blank
     // overflow is not hidden content and must not manufacture a cut marker.
     while let Some(last) = spans.last_mut() {
@@ -198,7 +197,7 @@ mod tests {
                 "                                            ",
                 "────────────────── wCM:p9 ──────────────────",
                 "                                            ",
-                "  rebuilt .#larkspur, generation 541        ",
+                "rebuilt .#larkspur, generation 541          ",
             ]
         );
     }
@@ -213,8 +212,8 @@ mod tests {
             tail_frame(&tail, 20, 3, 0).rows(),
             vec![
                 "─────── w:p1 ───────",
-                "  three             ",
-                "  four              "
+                "three               ",
+                "four                "
             ]
         );
     }
@@ -452,11 +451,11 @@ mod tests {
         assert_eq!(
             rows[1..],
             [
-                format!("    {}", "─".repeat(40)).as_str(),
+                format!("  {}", "─".repeat(40)).as_str(),
                 "",
-                "    The second switch is dun-7.3, and its pane is still reading the map.",
+                "  The second switch is dun-7.3, and its pane is still reading the map.",
                 "",
-                "  ✻ Worked for 3m 12s · done 14:05",
+                "✻ Worked for 3m 12s · done 14:05",
                 "",
             ]
         );
@@ -496,7 +495,7 @@ mod tests {
 
         assert_eq!(
             tail_frame(&tail, 20, 2, 0).rows(),
-            vec!["─────── w:p1 ───────", "  a line with a gre…"]
+            vec!["─────── w:p1 ───────", "a line with a great…"]
         );
     }
 

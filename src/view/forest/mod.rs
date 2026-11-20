@@ -132,6 +132,8 @@ pub struct Forest {
     show_fixtures: bool,
     /// Whether finished branches are drawn individually instead of as runs.
     show_completed: bool,
+    /// Scope to restore when leaving the temporary all-trees view.
+    filter_before_all: Option<Filter>,
     /// The last bead tree explicitly inspected, kept through refresh filtering.
     pinned_root: Option<BeadKey>,
     /// A selected bead that became closed during refresh remains visible until Home.
@@ -168,6 +170,7 @@ pub fn flatten(snapshot: Snapshot) -> Forest {
         unblocking: BTreeSet::new(),
         show_fixtures: false,
         show_completed: false,
+        filter_before_all: None,
         pinned_root: None,
         preserve_completed: None,
         reveal_selection: None,
@@ -387,7 +390,11 @@ impl Forest {
                         .iter()
                         .any(|bead| bead.is(&key) && bead.status.is_closed())
             });
-            if closed {
+            let was_unfinished = self
+                .snapshot
+                .node(&key)
+                .is_some_and(|bead| !bead.status.is_finished());
+            if closed && was_unfinished {
                 self.preserve_completed = Some(key);
             }
         }
@@ -738,6 +745,7 @@ impl Forest {
                 self.unblocking.clear();
                 self.search_filter.clear();
                 self.show_completed = false;
+                self.filter_before_all = None;
                 self.show_fixtures = false;
                 self.pinned_root = None;
                 self.preserve_completed = None;
@@ -802,6 +810,9 @@ impl Forest {
             }
             Action::ToggleCompleted => {
                 self.show_completed = !self.show_completed;
+                if !self.show_completed {
+                    self.preserve_completed = None;
+                }
                 true
             }
             Action::ToggleDependencies => {
@@ -1179,8 +1190,9 @@ impl Forest {
 
     fn toggle_filter(&mut self) {
         let next = match self.snapshot.filter {
-            Filter::All => Filter::LiveAgents,
+            Filter::All => self.filter_before_all.take().unwrap_or(Filter::LiveAgents),
             Filter::LiveAgents | Filter::CurrentWork | Filter::Activity | Filter::History => {
+                self.filter_before_all = Some(self.snapshot.filter);
                 Filter::All
             }
         };
@@ -1189,6 +1201,7 @@ impl Forest {
     }
 
     fn next_scope(&mut self) {
+        self.filter_before_all = None;
         self.reveal_selection = None;
         let next = match self.snapshot.filter {
             Filter::CurrentWork | Filter::LiveAgents => Filter::Activity,

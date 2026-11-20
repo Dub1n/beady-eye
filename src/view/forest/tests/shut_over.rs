@@ -5,6 +5,41 @@ use crate::config::DrawnOn;
 use crate::model::badges::Badged;
 use pretty_assertions::assert_eq;
 
+#[test]
+fn active_execution_without_presence_does_not_invent_a_live_agent() {
+    let rows = r#"[
+        {"id":"hbr-8","title":"Repair harbour","status":"open"},
+        {"id":"hbr-8.1","title":"Inspect pier","status":"in_progress",
+         "dependencies":[{"depends_on_id":"hbr-8","type":"parent-child"}]}
+    ]"#;
+    let mut tree = tree_of("dunwich", rows);
+    let child = tree
+        .beads
+        .iter_mut()
+        .find(|node| node.id == "hbr-8.1")
+        .unwrap();
+    child.activity = Some(
+        serde_json::from_value(serde_json::json!({
+            "state":"Working", "project":"dunwich", "bead_id":"hbr-8.1",
+            "attempt_id":null, "task_id":"task-invented", "worker_name":null,
+            "worker_type":null, "effective_model":null, "child_session":"session-invented",
+            "coordinator":null, "observed_at":null, "fresh":true,
+            "acceptance_ready":false, "evidence":[]
+        }))
+        .unwrap(),
+    );
+    assert_eq!(counts_beneath(&tree, 0, &[]).live_agents, 0);
+    tree.beads
+        .iter_mut()
+        .find(|node| node.id == "hbr-8.1")
+        .unwrap()
+        .activity
+        .as_mut()
+        .unwrap()
+        .worker_presence = Some(crate::collect::omo::PresenceState::LiveIdle);
+    assert_eq!(counts_beneath(&tree, 0, &[]).live_agents, 1);
+}
+
 /// The bead this is for. A row shut over a branch is the only thing on
 /// the screen standing for it, and until now it said its own fraction
 /// and its own agent and nothing about the seats inside it.

@@ -4,10 +4,10 @@
 
 - [x] Move the enduring worker-evidence design into maintained documentation;
   keep experiments, captures and local agent state out of Git.
-- [ ] Refresh pane titles without polling trackers or changing focus.
-- [ ] Restore the previous scope when leaving the temporary all-trees view,
+- [x] Refresh pane titles without polling trackers or changing focus.
+- [x] Restore the previous scope when leaving the temporary all-trees view,
   and hide leaves that were already complete when completed work was hidden.
-- [ ] Draw pane preview content flush with the left edge and distinguish
+- [x] Draw pane preview content flush with the left edge and distinguish
   confirmed worker execution from known live presence in project notices.
 
 Open follow-ups (not part of this cleanup):

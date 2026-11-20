@@ -533,6 +533,18 @@ the adapter contract before selecting any provider for upstream. Keep
 prospective admissions, expiring current observations and retained settled
 identity separate; none confers an acceptance or preview-routing guarantee.
 
+**Fork regression coverage:** A current headless worker can count toward the
+project total without the optional observer, but an execution state alone is
+not observed presence for a collapsed branch. Retain both cases and keep
+coordinator panes distinct from a worker's identity when extracting this work.
+
+**Independent pane-refresh follow-up:** A bounded 30-second refresh of pane
+metadata keeps captions current when an external producer stands down tracker
+polling. It neither polls trackers nor answers a pending focus change. Extract
+it independently of the native provider. Review the interval and provider call
+cost before changing upstream defaults; retain the covered-project, bounded
+queue and focus-ordering tests.
+
 **0.44.0 follow-up to proposal 9:** Missing models can be recovered passively from
 exact native worker sessions or an explicitly configured coordinator directory.
 Reads verify IDs, bound directory/body/cache sizes and preserve incremental scan

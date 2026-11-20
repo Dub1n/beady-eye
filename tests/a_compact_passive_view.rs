@@ -567,3 +567,220 @@ fn live_native_owners_are_visible_on_beads_and_open_their_linked_details() {
         app.send(b"\x1bq");
     }
 }
+
+#[test]
+fn future_observation_draws_idle_headless_worker_and_preserves_detail_identity() {
+    let home = a_home_naming_one_project_settled(
+        "observed-headless-idle",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&observations).unwrap();
+    let cfg = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&cfg).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    std::fs::write(cfg, config).unwrap();
+    let now = chrono::Utc::now();
+    std::fs::write(
+        tasks.join("st_future.json"),
+        serde_json::json!({
+            "task_id":"st_future","created_at":"2026-01-01T00:00:00Z",
+            "updated_at":now,"status":"running","parent_session_id":"owner-a",
+            "child_session_id":"child-new"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        observations.join("frame-test.json"),
+        serde_json::json!({
+            "version":1,
+            "scope":{"project":"arkham","taskDirectory":tasks},
+            "epoch":"epoch-a","sequence":1,"observedAt":now,
+            "expiresAt":now + chrono::Duration::seconds(3),
+            "admissions":[{
+                "bead":"ark-future","attempt":"attempt-a","toolCall":"call-a",
+                "task":"st_future","parent":"owner-a",
+                "created":"2026-01-01T00:00:00Z","initialChild":null,"invalid":false
+            }],
+            "workers":[{
+                "task":"st_future","parent":"owner-a",
+                "created":"2026-01-01T00:00:00Z","child":"child-new",
+                "session":"child-new","identity":"host:instance-a:child-new",
+                "model":"invented/gpt-6-luna","presence":"live_idle",
+                "execution":"inactive","source":"authenticated-host-baseline",
+                "observedAt":now
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(
+        &serde_json::json!([{
+            "id":"ark-future","title":"Idle gateway worker","status":"in_progress",
+            "priority":2,"issue_type":"task",
+            "metadata":{
+                "qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                "qrclipDispatch":{
+                    "attemptId":"attempt-a","taskId":"st_future","toolCallId":"call-a",
+                    "outcome":"native-admitted"
+                }
+            }
+        }])
+        .to_string(),
+    );
+    let mut bdi = Driven::bdi(32, 120, home, &tracker.environment());
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"idle", GIVING_UP);
+    let mark = bdi.resize(33, 120);
+    let screen = bdi.answer_to(mark, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(text.contains("Luna") && text.contains("idle"), "{text}");
+    assert!(
+        !text.contains("trees with no live agent"),
+        "idle headless worker should keep tree live: {text}"
+    );
+    assert!(
+        !text.contains("nobody is working"),
+        "pane absence is not work absence: {text}"
+    );
+    let mark = bdi.send(b"/ark-future\r");
+    bdi.answer_to(mark, GIVING_UP);
+    let mark = bdi.send(b"\r");
+    bdi.answer_to(mark, GIVING_UP);
+    let mark = bdi.resize(45, 120);
+    let screen = bdi.answer_to(mark, GIVING_UP);
+    assert_eq!(
+        terminal::window_over(&screen).as_deref(),
+        Some("ark-future")
+    );
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("LiveIdle") && text.contains("Inactive"),
+        "{text}"
+    );
+    assert!(
+        text.contains("child-new"),
+        "worker session must be individually identifiable: {text}"
+    );
+    bdi.send(b"\x1bq");
+}
+
+#[test]
+fn headless_worker_identity_remains_visible_when_only_coordinator_is_live() {
+    use terminal::shims::ShimmedHerdr;
+
+    let home = a_home_naming_one_project_settled(
+        "unknown-headless-worker-live-coordinator",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&observations).unwrap();
+    let config_path = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    std::fs::write(&config_path, config).unwrap();
+
+    let now = chrono::Utc::now();
+    let created = "2026-01-01T00:00:00Z";
+    std::fs::write(
+        tasks.join("st_headless.json"),
+        serde_json::json!({
+            "task_id":"st_headless","created_at":created,"updated_at":now,"status":"running",
+            "parent_session_id":"owner-a","child_session_id":"child-known",
+            "name":"Invented leaf reviewer","agent_type":"reviewer",
+            "effective_model":{"provider":"invented","model_id":"gpt-6-luna"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        observations.join("frame-test.json"),
+        serde_json::json!({
+            "version":1,
+            "scope":{"project":"arkham","taskDirectory":tasks},
+            "epoch":"epoch-a","sequence":1,"observedAt":now,
+            "expiresAt":now + chrono::Duration::seconds(3),
+            "admissions":[{
+                "bead":"ark-headless","attempt":"attempt-a","toolCall":"call-a",
+                "task":"st_headless","parent":"owner-a","created":created,
+                "initialChild":null,"invalid":false
+            }],
+            "workers":[]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(
+        &serde_json::json!([{
+            "id":"ark-headless","title":"Invented delegated work","status":"in_progress",
+            "priority":2,"issue_type":"task",
+            "metadata":{
+                "qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                "qrclipDispatch":{
+                    "attemptId":"attempt-a","taskId":"st_headless","toolCallId":"call-a",
+                    "outcome":"native-admitted"
+                }
+            }
+        }])
+        .to_string(),
+    );
+
+    let herdr = ShimmedHerdr::beside(&home);
+    let configured: toml::Value = toml::from_str(
+        &std::fs::read_to_string(home.join(".config/beady-eye/config.toml")).unwrap(),
+    )
+    .unwrap();
+    let cwd = configured["projects"][0]["path"].as_str().unwrap();
+    herdr.holds_in(
+        "default",
+        &serde_json::json!({"result":{"agents":[{
+            "pane_id":"w:p1","cwd":cwd,"agent_status":"working","agent":"pi",
+            "title":"Invented coordinator",
+            "agent_session":{"agent":"pi","kind":"id","source":"invented","value":"owner-a"}
+        }]}})
+        .to_string(),
+    );
+    let mut env = tracker.environment();
+    env.extend(herdr.environment());
+    let mut bdi = Driven::bdi(32, 120, home, &env);
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"coord live", GIVING_UP);
+    let repaint = bdi.resize(33, 120);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("worker Invented leaf reviewer · coord live · ?"),
+        "the row must identify the headless worker without attributing the coordinator's presence to it: {text}"
+    );
+
+    let search = bdi.send(b"/ark-headless\r");
+    bdi.answer_to(search, GIVING_UP);
+    let detail = bdi.send(b"\r");
+    bdi.answer_to(detail, GIVING_UP);
+    let repaint = bdi.resize(45, 120);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let details = terminal::rows_drawn(&screen).join("\n");
+    assert_eq!(
+        terminal::window_over(&screen).as_deref(),
+        Some("ark-headless")
+    );
+    assert!(details.contains("child-known"), "{details}");
+    assert!(details.contains("Execution: Unknown"), "{details}");
+    bdi.send(b"\x1bq");
+}
