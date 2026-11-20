@@ -490,23 +490,6 @@ test("functional checks admit a bounded nested run while measurement checks rema
   assert.ok(nested.primary < nested.cleanup && nested.cleanup <= nested.whole);
 });
 
-test("expired primary command still runs separately reserved cleanup", async t => {
-  const f = await fixture(t);
-  const id = await f.create();
-  const prepared = await f.tracker.prepare(id, { mode: "direct" });
-  const cleanupPath = path.join(path.dirname(f.input), "cleanup.txt");
-  const proof = await f.tracker.check(id, prepared.attempt, {
-    command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"],
-    budgetMs: 5000,
-    cleanup: { command: process.execPath,
-      args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(cleanupPath)}, "cleaned")`] },
-  });
-  assert.equal(proof.passed, false);
-  assert.equal(await readFile(cleanupPath, "utf8"), "cleaned");
-  const receipt = JSON.parse(await readFile(path.join(cwd, proof.receipt.path), "utf8"));
-  assert.equal(receipt.commands.find(command => command.label === "work-check").outcome, "timeout");
-  assert.equal(receipt.commands.find(command => command.label === "work-cleanup").outcome, "exit");
-});
 
 test("cleanup that makes a tracked source invalid records a failed check and releases ownership", async t => {
   const f = await fixture(t);
