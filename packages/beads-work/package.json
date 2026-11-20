@@ -1,0 +1,20 @@
+{
+  "name": "@beady-eye/beads-work",
+  "license": "Apache-2.0",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "bdi-beads-work": "./cli.mjs"
+  },
+  "exports": {
+    "./tracker": "./agent-work.mjs",
+    "./commands": "./agent-work-cli.mjs",
+    "./policy": "./policy.mjs",
+    "./observation": "./harness-observation.mjs",
+    "./evidence-seal": "./evidence-seal.mjs"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=2 test/*.test.mjs"
+  }
+}

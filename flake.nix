@@ -4343,6 +4343,15 @@ and a second line"
             touch $out
           '';
 
+          omo-observer = pkgs.runCommand "omo-observer-test"
+            { nativeBuildInputs = [ pkgs.nodejs ]; } ''
+            cp -R ${sourceOf [ ./adapters/omo-observer ]} observer-check
+            chmod -R u+w observer-check
+            cd observer-check
+            node --test adapters/omo-observer/test/*.test.mjs
+            touch "$out"
+          '';
+
           # A second invocation rather than a flag on the one above, because
           # `--all-targets` is what defeats it: building the test targets pulls
           # in the dev-dependencies, which turns `testing` on, which makes the

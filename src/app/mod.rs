@@ -145,6 +145,7 @@ pub(crate) mod fixtures {
             Asked::Focused(beads) => {
                 panic!("nothing focused the forest, and the collector was sent {beads:?}")
             }
+            Asked::RefreshPanes => panic!("a pane refresh is not a tracker read"),
         }
     }
 

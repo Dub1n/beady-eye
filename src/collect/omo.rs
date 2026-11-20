@@ -15,10 +15,14 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub mod history;
+mod observation;
 mod runtime;
+pub use observation::PresenceState;
 mod sessions;
 mod stream;
+mod work_policy;
 pub use runtime::resolve_runtime_session;
+pub(crate) use work_policy::WorkPolicy;
 
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const MAX_BATCH_RECORDS: usize = 256;
@@ -31,10 +35,14 @@ const MAX_STRING: usize = 512;
 pub struct OmoConfig {
     /// Directory containing `<task_id>.json`; it is read directly, never scanned.
     pub task_directory: PathBuf,
+    /// Optional bounded snapshots from the independent current-worker observer.
+    pub observation_directory: Option<PathBuf>,
     /// Exact project session-log directory for direct coordinator identity.
     pub session_directory: Option<PathBuf>,
     /// Explicit native RPC registry for resolving in-process session switches.
     pub runtime_directory: Option<PathBuf>,
+    /// Trusted installed work CLI, outside any viewed checkout.
+    pub work_policy_executable: Option<PathBuf>,
     /// Beads metadata path to the active attempt ID.
     pub attempt_path: String,
     /// Beads metadata path to the dispatch receipt object.
@@ -53,8 +61,10 @@ impl Default for OmoConfig {
     fn default() -> Self {
         Self {
             task_directory: PathBuf::new(),
+            observation_directory: None,
             session_directory: None,
             runtime_directory: None,
+            work_policy_executable: None,
             attempt_path: "metadata.qrclipWork.attempt".into(),
             dispatch_path: "metadata.qrclipDispatch".into(),
             acceptance_ready_path: None,
@@ -72,6 +82,13 @@ impl OmoConfig {
             return Err("OmO task_directory must be an absolute path");
         }
         if self
+            .observation_directory
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute())
+        {
+            return Err("OmO observation_directory must be an absolute path");
+        }
+        if self
             .session_directory
             .as_ref()
             .is_some_and(|path| !path.is_absolute())
@@ -84,6 +101,13 @@ impl OmoConfig {
             .is_some_and(|path| !path.is_absolute())
         {
             return Err("OmO runtime_directory must be an absolute path");
+        }
+        if self
+            .work_policy_executable
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute())
+        {
+            return Err("OmO work_policy_executable must be an absolute path");
         }
         if self.attempt_path.is_empty()
             || self.dispatch_path.is_empty()
@@ -123,6 +147,17 @@ pub enum ExecutionState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Activity {
     pub state: ActivityState,
+    /// Fresh observer presence, independent of execution and terminal panes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_presence: Option<PresenceState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_execution: Option<ExecutionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_presence: Option<PresenceState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_identity: Option<String>,
     pub project: String,
     pub bead_id: String,
     pub attempt_id: Option<String>,
@@ -143,6 +178,31 @@ pub struct Activity {
 }
 
 impl Activity {
+    /// A current delegated child with independently qualified active execution.
+    /// Coordinator activity, cached task state and presence alone are excluded.
+    pub fn has_active_delegated_worker(&self) -> bool {
+        if self.state != ActivityState::Working
+            || self.attempt_id.as_deref().is_none_or(str::is_empty)
+        {
+            return false;
+        }
+        let qualified = |worker: &Activity| {
+            worker.attempt_id == self.attempt_id
+                && worker.state == ActivityState::Working
+                && worker.fresh == Some(true)
+                && worker.worker_execution == Some(ExecutionState::Active)
+                && worker.worker_identity.is_some()
+                && worker.child_session.is_some()
+                && worker.task_id.is_some()
+                && worker.worker_type.as_deref() != Some("direct")
+        };
+        if self.workers.is_empty() {
+            qualified(self)
+        } else {
+            self.workers.iter().any(qualified)
+        }
+    }
+
     /// Short display label for the effective model, preserving unknown models.
     pub fn model_label(&self) -> Option<&str> {
         self.effective_model.as_deref().map(short_model)
@@ -201,6 +261,9 @@ impl Activity {
                 ExecutionState::Inactive
             };
         }
+        if let Some(execution) = self.worker_execution {
+            return execution;
+        }
         match self.state {
             ActivityState::Working if self.fresh == Some(true) => ExecutionState::Active,
             ActivityState::Finished
@@ -213,6 +276,24 @@ impl Activity {
             }
             _ => ExecutionState::Unknown,
         }
+    }
+
+    /// Headless presence is measured separately from a worker's execution.
+    pub fn presence_state(&self) -> PresenceState {
+        if self.state == ActivityState::Conflict {
+            return PresenceState::Unknown;
+        }
+        if !self.workers.is_empty() {
+            let states: Vec<_> = self.workers.iter().map(Self::presence_state).collect();
+            if states.contains(&PresenceState::LiveBusy) {
+                return PresenceState::LiveBusy;
+            }
+            if states.contains(&PresenceState::LiveIdle) {
+                return PresenceState::LiveIdle;
+            }
+            return PresenceState::Unknown;
+        }
+        self.worker_presence.unwrap_or(PresenceState::Unknown)
     }
 
     /// Human-readable state for a detail pane.
@@ -272,6 +353,7 @@ type StreamKey = (String, String, String, String, String);
 /// in the batch are read only once. Cache lifetime is the Reader lifetime.
 pub struct Reader {
     config: OmoConfig,
+    observations: observation::Observations,
     records: BTreeMap<String, CachedRecord>,
     sessions: sessions::Sessions,
     streams: stream::Streams,
@@ -289,6 +371,7 @@ enum NativeFields {
     Model,
     String,
     Version,
+    Notification,
 }
 
 impl<'de> DeserializeSeed<'de> for NativeFields {
@@ -310,13 +393,16 @@ impl<'de> Visitor<'de> for NativeFields {
         let mut fields = serde_json::Map::new();
         while let Some(key) = map.next_key::<String>()? {
             let kind = match (self, key.as_str()) {
-                (Self::Task, "version") => Some(Self::Version),
+                (Self::Task, "version" | "pid") => Some(Self::Version),
+                (Self::Task, "notification") => Some(Self::Notification),
+                (Self::Notification, "run_epoch") => Some(Self::Version),
                 (Self::Task, "effective_model" | "resolved_model") => Some(Self::Model),
                 (
                     Self::Task,
                     "task_id" | "project" | "bead_id" | "attempt_id" | "coordinator"
                     | "parent_session_id" | "child_session_id" | "model" | "effectiveModel"
-                    | "agent_type" | "workerType" | "name" | "workerName" | "status" | "updated_at",
+                    | "agent_type" | "workerType" | "name" | "workerName" | "status" | "updated_at"
+                    | "created_at",
                 )
                 | (Self::Model, "display" | "provider" | "model_id") => Some(Self::String),
                 _ => None,
@@ -329,11 +415,13 @@ impl<'de> Visitor<'de> for NativeFields {
                 map.next_value::<IgnoredAny>()?;
             }
         }
-        Ok(if matches!(self, Self::Task | Self::Model) {
-            Value::Object(fields)
-        } else {
-            Value::Null
-        })
+        Ok(
+            if matches!(self, Self::Task | Self::Model | Self::Notification) {
+                Value::Object(fields)
+            } else {
+                Value::Null
+            },
+        )
     }
 
     fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Value, S::Error> {
@@ -396,6 +484,7 @@ impl Reader {
     pub fn new(config: OmoConfig) -> Self {
         Self {
             config,
+            observations: Default::default(),
             records: BTreeMap::new(),
             sessions: sessions::Sessions::default(),
             streams: stream::Streams::default(),
@@ -406,6 +495,7 @@ impl Reader {
     /// Collect all supplied beads; at most 256 distinct task files are read.
     pub fn collect(&mut self, inputs: &[BeadInput]) -> ActivityBatch {
         self.sessions.begin_collection();
+        self.observations.refresh(&self.config);
         self.stream_eligible.clear();
         let mut batch = ActivityBatch::default();
         let dispatch_path = self.config.dispatch_path.as_str();
@@ -415,7 +505,14 @@ impl Reader {
             .collect::<std::collections::BTreeSet<_>>();
         self.records
             .retain(|task_id, _| referenced.contains(task_id));
-        for input in inputs {
+        let mut ordered_inputs = inputs.iter().collect::<Vec<_>>();
+        ordered_inputs.sort_by_key(|input| {
+            input
+                .bead_status
+                .as_deref()
+                .is_some_and(|status| status.eq_ignore_ascii_case("closed"))
+        });
+        for input in ordered_inputs {
             let mut activity = self.read_one(input);
             self.coordinator_identity(&mut activity);
             if activity.workers.is_empty() {
@@ -436,7 +533,7 @@ impl Reader {
                 .activities
                 .insert((input.project.clone(), input.bead_id.clone()), activity);
         }
-        if self.config.runtime_directory.is_some() {
+        if self.config.runtime_directory.is_some() && self.config.observation_directory.is_none() {
             let coordinators = batch
                 .activities
                 .values()
@@ -449,13 +546,17 @@ impl Reader {
                 if activity.workers.is_empty() {
                     let eligible = stream_key(activity)
                         .and_then(|key| self.stream_eligible.get(&key).copied());
-                    self.streams.apply(activity, eligible);
+                    if self.config.observation_directory.is_none() {
+                        self.streams.apply(activity, eligible);
+                    }
                 } else {
                     let mut workers = std::mem::take(&mut activity.workers);
                     for worker in &mut workers {
                         let eligible = stream_key(worker)
                             .and_then(|key| self.stream_eligible.get(&key).copied());
-                        self.streams.apply(worker, eligible);
+                        if self.config.observation_directory.is_none() {
+                            self.streams.apply(worker, eligible);
+                        }
                     }
                     *activity = aggregate(activity.clone(), workers);
                 }
@@ -494,6 +595,15 @@ impl Reader {
         if activity.attempt_id.as_deref().is_none_or(str::is_empty) {
             return;
         }
+        if let Some(baseline) = activity.coordinator.as_deref().and_then(|session| {
+            self.observations
+                .coordinator(&self.config, &activity.project, session, Utc::now())
+        }) {
+            activity.coordinator_presence = Some(baseline.presence);
+            activity.coordinator_identity = Some(baseline.identity);
+            activity.coordinator_model = baseline.model;
+            activity.evidence.push("fresh public coordinator context supplies ownership presence only; coordinator activity is not execution on every owned bead".into());
+        }
         if let Some((directory, session)) = self
             .config
             .session_directory
@@ -502,7 +612,9 @@ impl Reader {
         {
             match self.sessions.verify(directory, session) {
                 Ok(()) => {
-                    activity.coordinator_model = self.sessions.model(directory, session);
+                    if activity.coordinator_model.is_none() {
+                        activity.coordinator_model = self.sessions.model(directory, session);
+                    }
                     activity.evidence.push(format!("coordinator ownership from current attempt and verified session {session}; ownership may be shared across beads"));
                 }
                 Err(reason) => activity
@@ -690,7 +802,15 @@ impl Reader {
             return result;
         }
         result.task_id = task_id.clone();
-        result.child_session = receipt_session;
+        // The prospective source requires a verified admission. Do not leak
+        // an early receipt hint into its session fallback or live-pane join.
+        // The legacy reader retains its explicit receipt-owned log identity.
+        result.child_session = self
+            .config
+            .observation_directory
+            .is_none()
+            .then(|| receipt_session.clone())
+            .flatten();
         let Some(task_id) = task_id else {
             result
                 .evidence
@@ -794,11 +914,33 @@ impl Reader {
         {
             conflicts.push("parent session mismatch");
         }
+        let mut observer_conflict = false;
+        let observed = if self.config.observation_directory.is_some() && !last_known {
+            match self
+                .observations
+                .qualify(&self.config, input, receipt, &value, Utc::now())
+            {
+                Ok(observed) => Some(observed),
+                Err(reason) => {
+                    observer_conflict = reason.is_conflict();
+                    result
+                        .evidence
+                        .push(format!("current-worker observer: {}", reason.reason()));
+                    if let Some(reason) = self.observations.reason {
+                        result.evidence.push(reason.into());
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let record_session = text(&value, "child_session_id");
-        if record_session
-            .as_deref()
-            .zip(result.child_session.as_deref())
-            .is_some_and(|(a, b)| a != b)
+        if observed.is_none()
+            && record_session
+                .as_deref()
+                .zip(receipt_session.as_deref())
+                .is_some_and(|(a, b)| a != b)
         {
             conflicts.push("child session mismatch");
         }
@@ -809,13 +951,28 @@ impl Reader {
                 .extend(conflicts.into_iter().map(str::to_owned));
             return result;
         }
+        if self.config.observation_directory.is_some() && observed.is_none() {
+            // Opting into prospective admissions must not fall back to an old
+            // receipt pin after observed deletion/reuse or a conflicting cache.
+            result.state = if observer_conflict {
+                ActivityState::Conflict
+            } else {
+                ActivityState::Unknown
+            };
+            result.child_session = None;
+            result.worker_execution = Some(ExecutionState::Unknown);
+            result.worker_presence = Some(PresenceState::Unknown);
+            result.evidence.push("prospective observer configured: missing or invalid admissions cannot use the legacy receipt-child fallback".into());
+            return result;
+        }
         // A reusable task ID does not identify the child dispatched for this
         // attempt. Optional task metadata and timestamps cannot replace that pin.
         let explicit_child = field(dispatch, "childSession").and_then(string_value);
-        if !explicit_child.is_some_and(safe_id)
-            || record_session.as_deref() != explicit_child
-            || !attempt_coordinator.as_deref().is_some_and(safe_id)
-            || record_parent.as_deref() != attempt_coordinator.as_deref()
+        if observed.is_none()
+            && (!explicit_child.is_some_and(safe_id)
+                || record_session.as_deref() != explicit_child
+                || !attempt_coordinator.as_deref().is_some_and(safe_id)
+                || record_parent.as_deref() != attempt_coordinator.as_deref())
         {
             result.state = ActivityState::Unknown;
             // Do not let session lookup promote a receipt whose readable task
@@ -891,6 +1048,74 @@ impl Reader {
         } else {
             None
         };
+        if let Some(observed) = observed {
+            result.child_session = observed.session;
+            let terminal = matches!(
+                native_status.as_str(),
+                "completed"
+                    | "finished"
+                    | "failed"
+                    | "error"
+                    | "cancelled"
+                    | "canceled"
+                    | "interrupted"
+                    | "lost"
+            );
+            // A verified terminal task establishes inactivity even if its
+            // worker's presence source is gone. Presence is a separate fact.
+            result.worker_execution = Some(if terminal {
+                ExecutionState::Inactive
+            } else {
+                ExecutionState::Unknown
+            });
+            result.worker_presence = Some(PresenceState::Unknown);
+            result.evidence.push("future guarded admission matches current task creation, parent, receipt and attempt; current child may replace the original child".into());
+            // Re-read after the source read; partial/missing/racing native data
+            // cannot qualify either a current association or activity baseline.
+            let readback = read_bounded(
+                &self.config.task_directory.join(format!("{task_id}.json")),
+                self.config.max_record_bytes,
+            )
+            .ok()
+            .flatten()
+            .and_then(|(b, _)| serde_json::from_slice::<NativeRecord>(&b).ok());
+            if readback.as_ref().map(|r| &r.0) != Some(&value) {
+                result.child_session = None;
+                result.effective_model = None;
+                result.state = ActivityState::Unknown;
+                result.evidence.push(
+                    "native task changed during observation; resynchronization required".into(),
+                );
+                return result;
+            }
+            if let Some(baseline) = observed.baseline {
+                result.worker_identity = Some(baseline.identity);
+                result.worker_presence = Some(baseline.presence);
+                result.effective_model = baseline.model;
+                result.observed_at = Some(baseline.observed_at);
+                result.fresh = Some(true);
+                result.worker_execution = Some(if terminal {
+                    ExecutionState::Inactive
+                } else if matches!(native_status.as_str(), "running" | "working") {
+                    baseline.execution
+                } else {
+                    ExecutionState::Unknown
+                });
+                result.evidence.push(format!("current-worker baseline: {}; presence and execution are independent; metadata only, no preview attached", baseline.source));
+            } else {
+                result.evidence.push("current assignment retained; worker activity unavailable, expired or ambiguous".into());
+            }
+            if result.state == ActivityState::Working
+                && result.worker_execution != Some(ExecutionState::Active)
+            {
+                result.state = ActivityState::Unknown;
+            } else if result.worker_execution == Some(ExecutionState::Active) {
+                result.state = ActivityState::Working;
+            }
+        } else if self.config.observation_directory.is_some() {
+            result.worker_execution = Some(ExecutionState::Unknown);
+            result.worker_presence = Some(PresenceState::Unknown);
+        }
         let check = current_check(
             input,
             &self.config.check_path,
@@ -1041,6 +1266,11 @@ impl Reader {
 fn empty_activity(input: &BeadInput) -> Activity {
     Activity {
         state: ActivityState::Unknown,
+        worker_presence: None,
+        worker_execution: None,
+        worker_identity: None,
+        coordinator_presence: None,
+        coordinator_identity: None,
         project: input.project.clone(),
         bead_id: input.bead_id.clone(),
         attempt_id: None,
@@ -1345,6 +1575,92 @@ mod tests {
     }
 
     #[test]
+    fn off_focus_execution_requires_current_delegated_worker_evidence() {
+        let mut worker = empty_activity(&input());
+        worker.attempt_id = Some("attempt".into());
+        worker.task_id = Some("task".into());
+        worker.child_session = Some("child".into());
+        worker.worker_identity = Some("worker".into());
+        worker.worker_execution = Some(ExecutionState::Active);
+        worker.state = ActivityState::Working;
+        worker.fresh = Some(true);
+        assert!(worker.has_active_delegated_worker());
+
+        let mut cases = Vec::new();
+        let mut changed = worker.clone();
+        changed.worker_execution = Some(ExecutionState::Unknown);
+        cases.push(changed);
+        let mut changed = worker.clone();
+        changed.worker_identity = None;
+        cases.push(changed);
+        let mut changed = worker.clone();
+        changed.child_session = None;
+        cases.push(changed);
+        let mut changed = worker.clone();
+        changed.worker_type = Some("direct".into());
+        cases.push(changed);
+        let mut changed = worker.clone();
+        changed.fresh = Some(false);
+        cases.push(changed);
+        let mut changed = worker.clone();
+        changed.state = ActivityState::Conflict;
+        cases.push(changed);
+        for case in cases {
+            assert!(!case.has_active_delegated_worker());
+        }
+
+        let mut aggregate = worker.clone();
+        aggregate.workers = vec![worker.clone(), worker];
+        assert!(aggregate.has_active_delegated_worker());
+        aggregate.state = ActivityState::Conflict;
+        assert!(!aggregate.has_active_delegated_worker());
+    }
+
+    #[test]
+    fn unfinished_beads_get_native_reads_before_closed_beads() {
+        let dir = temp_dir("closed-read-priority");
+        fs::create_dir_all(&dir).unwrap();
+        let mut inputs = Vec::new();
+        for index in 0..MAX_BATCH_RECORDS {
+            let task_id = format!("closed-task-{index:03}");
+            let mut row = input_for(&format!("demo-closed-{index:03}"));
+            row.bead_status = Some("Closed".into());
+            row.fields["metadata"]["qrclipDispatch"]["taskId"] = task_id.clone().into();
+            let mut task = record("completed");
+            task["task_id"] = task_id.into();
+            fs::write(
+                dir.join(format!("closed-task-{index:03}.json")),
+                serde_json::to_vec(&task).unwrap(),
+            )
+            .unwrap();
+            inputs.push(row);
+        }
+
+        let mut current = input_for("demo-current");
+        current.fields["metadata"]["qrclipDispatch"]["taskId"] = "current-task".into();
+        let mut task = record("running");
+        task["task_id"] = "current-task".into();
+        fs::write(
+            dir.join("current-task.json"),
+            serde_json::to_vec(&task).unwrap(),
+        )
+        .unwrap();
+        inputs.push(current);
+
+        let mut reader = Reader::new(OmoConfig {
+            task_directory: dir.clone(),
+            freshness_seconds: 3600,
+            ..Default::default()
+        });
+        let batch = reader.collect(&inputs);
+        assert_eq!(
+            batch.activities[&("demo".into(), "demo-current".into())].state,
+            ActivityState::Working
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn native_record_skips_conversation_fields_in_fresh_and_last_known_cache() {
         let mut task = record("completed");
         let secret = "invented sensitive conversation";
@@ -1361,7 +1677,7 @@ mod tests {
             "task_id":"task-1", "parent_session_id":"coord-1",
             "child_session_id":"session-1", "name":"worker", "agent_type":"agent",
             "model":"chatgpt-subscription/gpt-6-luna", "status":"completed",
-            "updated_at":task["updated_at"],
+            "updated_at":task["updated_at"], "created_at":task["created_at"],
             "effective_model": {"provider":null, "model_id":"gpt-6-luna",
                 "display":"chatgpt-subscription/gpt-6-luna"},
             "resolved_model": {"provider":null, "model_id":"gpt-6-luna",

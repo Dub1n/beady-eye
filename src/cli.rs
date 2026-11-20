@@ -549,6 +549,9 @@ pub fn run() -> anyhow::Result<ExitCode> {
                 collection.focus_on(beads);
                 Some(collection.redraw(&cfg, &listing, &*trackers, filter, Utc::now()))
             }
+            Asked::RefreshPanes => {
+                Some(collection.redraw(&cfg, &listing, &*trackers, filter, Utc::now()))
+            }
         }),
         reload,
     )?;

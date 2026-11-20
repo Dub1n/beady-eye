@@ -216,13 +216,16 @@ fn report(source: &mut dyn Changes, to: &Sender<Event>) {
 /// both has to know nothing about where either has got to.
 pub(super) fn collector(mut collect: Collecting, asked: &Receiver<Asked>, to: &Sender<Event>) {
     while let Ok(asked) = asked.recv() {
-        let redrawn = matches!(asked, Asked::Focused(_));
+        let focused = matches!(asked, Asked::Focused(_));
+        let panes = matches!(asked, Asked::RefreshPanes);
         let Some(snapshot) = collect(asked) else {
             continue;
         };
         let snapshot = Box::new(snapshot);
-        let event = if redrawn {
+        let event = if focused {
             Event::Redrawn(snapshot)
+        } else if panes {
+            Event::PanesRefreshed(snapshot)
         } else {
             Event::Collected(snapshot)
         };
@@ -313,6 +316,23 @@ mod tests {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
     use std::time::Duration;
+
+    #[test]
+    fn pane_refresh_is_returned_separately_from_a_tracker_read_or_focus_redraw() {
+        let (ask, asked) = mpsc::channel();
+        let (to_loop, events) = mpsc::channel();
+        ask.send(Asked::RefreshPanes).unwrap();
+        drop(ask);
+        collector(
+            Box::new(|request| {
+                assert_eq!(request, Asked::RefreshPanes);
+                Some(crate::tui::fixtures::a_snapshot())
+            }),
+            &asked,
+            &to_loop,
+        );
+        assert!(matches!(events.try_recv(), Ok(Event::PanesRefreshed(_))));
+    }
 
     /// A source that reports only when the test says so.
     struct OnCue(Receiver<Wanted>);

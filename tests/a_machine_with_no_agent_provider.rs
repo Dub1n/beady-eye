@@ -38,9 +38,6 @@ const THE_ROOT: &[u8] = "bdi-2bb".as_bytes();
 /// wrong word passed here and failed there.
 const A_WORD_OF_THE_NOTICE: &[u8] = "shown".as_bytes();
 
-/// The same for the tail band's *no agents to show · reading beads only*.
-const A_WORD_OF_THE_BAND: &[u8] = "only".as_bytes();
-
 /// A `bdi` run against a tracker holding the capture, in `environment`.
 fn drawn_by(bdi: &mut Driven) -> Vec<u8> {
     bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
@@ -95,8 +92,12 @@ fn a_run_with_no_provider_installed_draws_every_tree_and_is_not_warned() {
         "a machine with no herdr was warned about herdr: {}",
         bdi.timeline()
     );
+    let repaint = bdi.resize(ROWS + 1, COLS);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
     assert!(
-        contains(&drawn, A_WORD_OF_THE_BAND),
+        terminal::rows_drawn(&screen)
+            .iter()
+            .any(|row| row.contains("no pane to show · select a bead for details")),
         "nothing said why there is no pane to show: {}",
         bdi.timeline()
     );

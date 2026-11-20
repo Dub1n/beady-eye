@@ -29,3 +29,8 @@ file supplements their layering, terminology, test and contribution rules.
   independently reviewable, with upstream defaults preserved unless agreed.
 - Build/install the viewer through sh herdr/build.sh. Do not restart or control
   the user's Herdr panes. Reopening the viewer loads the newly installed binary.
+- The optional observer lives in adapters/omo-observer. Run
+  `node --test adapters/omo-observer/test/*.test.mjs` for changes there; its
+  CI declaration is `checks.omo-observer`. Use its README's evidence limits
+  before widening source-mode claims. Keep research controls and extra tracker
+  polling out of the observer, and distinguish native runs from fixture tests.

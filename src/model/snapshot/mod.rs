@@ -248,7 +248,7 @@ pub struct Readiness {
 pub struct Counts {
     pub total: usize,
     pub finished: usize,
-    /// Distinct primary live panes plus native active work without a pane.
+    /// Distinct scoped live sessions/panes, including idle headless workers.
     pub live_agents: usize,
     /// Beads carrying at least one anomaly, not rules fired. Every other count
     /// here counts beads, and a header's warning count sends a reader looking
@@ -280,18 +280,54 @@ impl Counts {
         Counts {
             total: once.len(),
             finished: once.iter().filter(|n| n.status.is_finished()).count(),
-            live_agents: once
-                .iter()
-                .filter_map(|n| n.agent.as_ref().map(|a| &a.pane))
-                .collect::<BTreeSet<_>>()
-                .len()
-                + once
-                    .iter()
-                    .filter(|n| {
-                        n.agent.is_none()
-                            && n.execution_state() == crate::collect::omo::ExecutionState::Active
-                    })
-                    .count(),
+            live_agents: {
+                let mut identities = BTreeSet::new();
+                for node in &once {
+                    if let Some(agent) = &node.agent {
+                        let id = agent
+                            .agent_session
+                            .clone()
+                            .map(|s| format!("session:{s}"))
+                            .unwrap_or_else(|| format!("pane:{:?}", agent.pane));
+                        identities.insert((node.project.clone(), id));
+                    }
+                    if let Some(activity) = &node.activity {
+                        if activity.state == crate::collect::omo::ActivityState::Conflict {
+                            continue;
+                        }
+                        if activity
+                            .coordinator_presence
+                            .is_some_and(|p| p != crate::collect::omo::PresenceState::Unknown)
+                        {
+                            if let Some(session) = &activity.coordinator {
+                                identities
+                                    .insert((node.project.clone(), format!("session:{session}")));
+                            }
+                        }
+                        let workers = if activity.workers.is_empty() {
+                            std::slice::from_ref(activity)
+                        } else {
+                            &activity.workers
+                        };
+                        for worker in workers {
+                            if worker.presence_state()
+                                != crate::collect::omo::PresenceState::Unknown
+                                || (worker.attempt_id == activity.attempt_id
+                                    && worker.execution_state()
+                                        == crate::collect::omo::ExecutionState::Active)
+                            {
+                                let id = worker
+                                    .child_session
+                                    .as_ref()
+                                    .map(|s| format!("session:{s}"))
+                                    .unwrap_or_else(|| format!("bead:{}", node.id));
+                                identities.insert((node.project.clone(), id));
+                            }
+                        }
+                    }
+                }
+                identities.len()
+            },
             anomalies: once
                 .iter()
                 .filter(|n| {
@@ -410,6 +446,11 @@ impl Node {
     }
     pub fn agent_live(&self) -> bool {
         self.agent.is_some()
+            || self.activity.as_ref().is_some_and(|a| {
+                a.presence_state() != crate::collect::omo::PresenceState::Unknown
+                    || a.coordinator_presence
+                        .is_some_and(|p| p != crate::collect::omo::PresenceState::Unknown)
+            })
             || self.execution_state() == crate::collect::omo::ExecutionState::Active
     }
 
@@ -636,6 +677,26 @@ pub struct UnconfiguredPane {
     pub pane_status: PaneStatus,
 }
 
+/// Qualified active delegated execution outside the selected trees.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct OffFocusWorker {
+    pub project: String,
+    pub id: String,
+    pub role: &'static str,
+    pub execution: &'static str,
+}
+
+impl OffFocusWorker {
+    pub fn delegated(project: &str, id: &str) -> Self {
+        Self {
+            project: project.to_owned(),
+            id: id.to_owned(),
+            role: "delegated_worker",
+            execution: "active",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
@@ -681,6 +742,8 @@ pub struct Snapshot {
     /// never focused.
     #[serde(skip)]
     pub out_of_focus: BTreeSet<BeadKey>,
+    /// Distinct qualified active delegated work outside the current focus.
+    pub off_focus_workers: Vec<OffFocusWorker>,
     /// When each configured project's tracker was last read.
     ///
     /// Not `generated_at`, which is when the snapshot was drawn. A refresh
@@ -773,6 +836,7 @@ impl Snapshot {
             unanswered_by_the_watcher: Vec::new(),
             collected: Vec::new(),
             out_of_focus: BTreeSet::new(),
+            off_focus_workers: Vec::new(),
             read_at: BTreeMap::new(),
             speaks_until: BTreeMap::new(),
             projects,

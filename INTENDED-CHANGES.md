@@ -1,5 +1,42 @@
 # Intended changes: compact trees and passive agent activity
 
+## Checkout cleanup and viewer follow-ups
+
+- [x] Move the enduring worker-evidence design into maintained documentation;
+  keep experiments, captures and local agent state out of Git.
+- [x] Refresh pane titles without polling trackers or changing focus.
+- [x] Restore the previous scope when leaving the temporary all-trees view,
+  and hide leaves that were already complete when completed work was hidden.
+- [x] Draw pane preview content flush with the left edge and distinguish
+  confirmed worker execution from known live presence in project notices.
+
+Open follow-ups (not part of this cleanup):
+
+- [ ] Make related beads in details clickable and let details open even when
+  the target does not meet the current tree filter.
+- [ ] Investigate lost bead and pane association after abort; first establish
+  the exact conditions and distinguish lost evidence from a lost binding.
+- [ ] Decide in the optional work adapter whether new children require
+  reopening a completed parent and how ownership should be handled.
+- [ ] Explore optional session-to-bead assignment policy in the agent
+  integration, including projects without trackers.
+- [ ] Design explicit operator actions for assigning panes, editing beads or
+  starting a worker from a bead. Keep any such writes separate from viewing.
+- [ ] Investigate interactive pane preview only with current-target and input
+  routing guarantees.
+
+## Guarded work and evidence
+
+- [x] Keep the viewer passive. The separate work writer uses an exact
+  project policy; a repository or a bead cannot grant that permission.
+- [x] Let a project select a pinned, named fixture without accepting
+  arbitrary commands. Detect changed evidence after cleanup and keep
+  protected execution distinct from trusted execution.
+- [x] Verify a separate root-owned immutable archive against accepted
+  Beads digests while the checkout and tracker remain writable.
+- [x] Record scoped pane observations without treating missed intervals
+  as proof that a worker was active or idle.
+
 ## Orchestrator evidence follow-up
 
 ### Correlation and work records

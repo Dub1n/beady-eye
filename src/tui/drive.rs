@@ -50,6 +50,8 @@ pub(super) enum Event {
     /// What was standing, drawn again under a new focus. No read was asked
     /// for it, so it answers none.
     Redrawn(Box<Snapshot>),
+    /// A pane-only refresh, independent of tracker reads and focus changes.
+    PanesRefreshed(Box<Snapshot>),
     /// The provider has said what is on a pane, or would not say.
     Tailed(Answer),
     /// Something outside has asked `bdi` to stop.
@@ -332,6 +334,49 @@ enum Waited {
     Aged,
 }
 
+/// A bounded, independent clock for pane metadata. A slow collector
+/// cannot accumulate a queue of refreshes.
+struct PaneRefresh {
+    due: std::time::Instant,
+    pending: bool,
+    interval: Duration,
+}
+
+const PANE_REFRESH: Duration = Duration::from_secs(30);
+
+impl PaneRefresh {
+    fn new(now: std::time::Instant, interval: Duration) -> Self {
+        Self {
+            due: now + interval,
+            pending: false,
+            interval,
+        }
+    }
+
+    fn waits(&self, now: std::time::Instant) -> Option<Duration> {
+        (!self.pending).then(|| self.due.saturating_duration_since(now))
+    }
+
+    fn ask_if_due(&mut self, now: std::time::Instant, ask: &Sender<Asked>) {
+        if !self.pending && now >= self.due {
+            // A closed collector cannot answer; do not spin on its deadline.
+            self.pending = true;
+            let _ = ask.send(Asked::RefreshPanes);
+        }
+    }
+
+    fn answered(&mut self, now: std::time::Instant) {
+        self.pending = false;
+        self.due = now + self.interval;
+    }
+
+    fn observed(&mut self, now: std::time::Instant) {
+        if !self.pending {
+            self.due = now + self.interval;
+        }
+    }
+}
+
 /// The next thing the loop answers, or nothing where there will never be
 /// another.
 ///
@@ -365,15 +410,42 @@ pub(super) fn drive(
     view: &mut dyn View,
     events: &Receiver<Event>,
     ask: &Sender<Asked>,
+    outstanding: Outstanding,
+    reading: Reading,
+    arms: &Arming,
+    reload: Option<Reload>,
+) -> anyhow::Result<()> {
+    drive_with_pane_interval(
+        view,
+        events,
+        ask,
+        outstanding,
+        reading,
+        arms,
+        reload,
+        PANE_REFRESH,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tests vary the independent pane deadline without changing loop inputs."
+)]
+fn drive_with_pane_interval(
+    view: &mut dyn View,
+    events: &Receiver<Event>,
+    ask: &Sender<Asked>,
     mut outstanding: Outstanding,
     mut reading: Reading,
     arms: &Arming,
     mut reload: Option<Reload>,
+    pane_interval: Duration,
 ) -> anyhow::Result<()> {
     let mut showing = Showing::Forest;
     let mut drawn_at = Utc::now();
     // The collector starts focused where the view does.
     let mut focus = Focus::starting(view.focused_on());
+    let mut pane_refresh = PaneRefresh::new(std::time::Instant::now(), pane_interval);
     view.draw(showing, drawn_at)?;
 
     while let Some(waited) = wait(
@@ -385,7 +457,10 @@ pub(super) fn drive(
             reload.as_ref(),
             drawn_at,
             Utc::now(),
-        ),
+        )
+        .into_iter()
+        .chain(pane_refresh.waits(std::time::Instant::now()))
+        .min(),
     ) {
         let woken = match waited {
             // Nothing has happened and a deadline is up. Where it is the
@@ -398,6 +473,11 @@ pub(super) fn drive(
             // each of them does about the screen it says below.
             Waited::Aged => ran_out(view, drawn_at, Utc::now()),
             Waited::Event(event) => {
+                if matches!(event, Event::PanesRefreshed(_)) {
+                    pane_refresh.answered(std::time::Instant::now());
+                } else if matches!(event, Event::Collected(_) | Event::Redrawn(_)) {
+                    pane_refresh.observed(std::time::Instant::now());
+                }
                 let Some(changed) = answered(
                     view,
                     &mut outstanding,
@@ -422,6 +502,7 @@ pub(super) fn drive(
         let lapsed = view.lapsed(&reading.lapsed(now));
         focus.refocused(view, ask);
         outstanding.sends(ask, now);
+        pane_refresh.ask_if_due(std::time::Instant::now(), ask);
         view.reread(now);
         // A run reading a config file looks at it here; a run that found no
         // file to read has nothing to look at, and never will — the whole of
@@ -841,6 +922,12 @@ fn answered(
         }
         Event::Redrawn(snapshot) => {
             focus.redrawn();
+            if focus.is_answered() {
+                shows(view, showing, *snapshot);
+            }
+            true
+        }
+        Event::PanesRefreshed(snapshot) => {
             if focus.is_answered() {
                 shows(view, showing, *snapshot);
             }
@@ -2659,6 +2746,96 @@ pub(super) mod tests {
             "and nothing is said about the reads: {:?}",
             view.awaited
         );
+    }
+
+    #[test]
+    fn pane_refresh_stays_bounded_until_answered() {
+        let start = std::time::Instant::now();
+        let interval = Duration::from_secs(2);
+        let mut refresh = PaneRefresh::new(start, interval);
+        let (ask, asked) = mpsc::channel();
+        refresh.observed(start + Duration::from_secs(1));
+        refresh.ask_if_due(start + interval, &ask);
+        assert!(asked.try_recv().is_err());
+        refresh.ask_if_due(start + interval + Duration::from_secs(1), &ask);
+        refresh.observed(start + interval * 10);
+        refresh.ask_if_due(start + interval * 20, &ask);
+        assert_eq!(asked.try_iter().collect::<Vec<_>>(), [Asked::RefreshPanes]);
+        assert_eq!(refresh.waits(start + interval * 20), None);
+        refresh.answered(start + interval * 20);
+        refresh.ask_if_due(start + interval * 20 + Duration::from_secs(1), &ask);
+        assert!(asked.try_recv().is_err());
+        refresh.ask_if_due(start + interval * 21, &ask);
+        assert_eq!(asked.try_recv().unwrap(), Asked::RefreshPanes);
+    }
+
+    #[test]
+    fn covered_project_still_triggers_a_pane_refresh_without_a_tracker_read() {
+        let (to_loop, events) = mpsc::channel();
+        let (ask, asked) = mpsc::channel();
+        to_loop.send(Event::Covered("arkham".into())).unwrap();
+        let worker = thread::spawn(move || {
+            let mut view = Recorder::default();
+            let mut reading = a_run_reading(vec![Armed::as_poll_says(
+                "arkham".into(),
+                Poll::UntilCovered,
+                Duration::from_millis(30),
+            )]);
+            reading.came_back(
+                Some(Wanted::Everything),
+                &["arkham".into()],
+                &Default::default(),
+                &[],
+                Utc::now(),
+            );
+            let result = drive_with_pane_interval(
+                &mut view,
+                &events,
+                &ask,
+                at_once(),
+                reading,
+                &polling_every_interval(),
+                nothing_watched(),
+                Duration::from_millis(80),
+            );
+            (result, view.collected, view.awaited)
+        });
+        assert_eq!(
+            asked.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Asked::RefreshPanes
+        );
+        to_loop
+            .send(Event::PanesRefreshed(Box::new(a_snapshot())))
+            .unwrap();
+        to_loop.send(Event::Key(key(KeyCode::Char('q')))).unwrap();
+        let (result, collected, awaited) = worker.join().unwrap();
+        result.unwrap();
+        assert_eq!(collected, 1);
+        assert!(awaited.is_empty());
+        assert!(asked.try_iter().all(|a| !matches!(a, Asked::Read(_))));
+    }
+
+    #[test]
+    fn pane_refresh_does_not_answer_a_pending_focus_change() {
+        let mut view = Recorder::default();
+        let (ask, _asked) = mpsc::channel();
+        let events = waiting(vec![
+            Event::Key(key(KeyCode::Char('F'))),
+            Event::PanesRefreshed(Box::new(a_snapshot())),
+            Event::Collected(Box::new(a_snapshot())),
+            Event::Redrawn(Box::new(a_snapshot())),
+        ]);
+        drive(
+            &mut view,
+            &events,
+            &ask,
+            at_once(),
+            a_run_reading(nothing_armed()),
+            &polling_every_interval(),
+            nothing_watched(),
+        )
+        .unwrap();
+        assert_eq!(view.collected, 1, "only the focus redraw is shown");
     }
 
     /// A snapshot drawn under a focus the reader has since left is not

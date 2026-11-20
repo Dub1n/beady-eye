@@ -797,6 +797,7 @@ mod tests {
             filter: Filter::All,
             collected: trees.clone(),
             out_of_focus: BTreeSet::new(),
+            off_focus_workers: Vec::new(),
             trees,
             projects,
             views: Vec::new(),

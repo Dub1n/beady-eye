@@ -80,6 +80,8 @@ pub enum Asked {
     /// Every one is answered, because the loop shows no snapshot while one
     /// is unanswered.
     Focused(BTreeSet<BeadKey>),
+    /// Rebuild from the current pane listing without requesting tracker reads.
+    RefreshPanes,
 }
 
 /// A read that has been asked for and has not come back: what it is to
@@ -730,17 +732,6 @@ impl Collection {
     ) -> Result<Snapshot, BTreeSet<String>> {
         let rooted = cfg;
         let cfg = &self.widened(rooted);
-        let mut native_panes = panes.to_vec();
-        for pane in &mut native_panes {
-            let config = join::project_of(pane, &cfg.projects).and_then(|p| cfg.omo.get(&p.name));
-            if let Some(config) = config {
-                if let Err(error) = crate::collect::omo::resolve_runtime_session(pane, config) {
-                    pane.state_labels
-                        .insert("bdi-session-identity".into(), error);
-                }
-            }
-        }
-        let panes = native_panes.as_slice();
         let answered: Vec<(&str, &ProjectWork)> = self.that_answered(cfg).collect();
         let drawn = reaching_across(&answered, &rooted.scope, &self.reached.trees);
         // Over every tree, focused or not, so that leaving the focus has
@@ -749,6 +740,35 @@ impl Collection {
         if !needed.is_empty() {
             return Err(needed);
         }
+        // Share one fresh decision between native identity and activity reads.
+        // Base tracker and pane collection do not use the work integration.
+        use crate::collect::omo::WorkPolicy;
+        let policies: BTreeMap<_, _> = cfg
+            .read()
+            .filter_map(|project| {
+                let config = cfg.omo.get(&project.name)?;
+                let policy = WorkPolicy::inspect(config, project, &cfg.projects)?;
+                Some((project.name.as_str(), policy))
+            })
+            .collect();
+        let readable = |project: &str| match policies.get(project) {
+            Some(policy) => policy.reader_config(),
+            None => cfg
+                .omo
+                .get(project)
+                .filter(|config| config.work_policy_executable.is_none()),
+        };
+        let mut native_panes = panes.to_vec();
+        for pane in &mut native_panes {
+            let config = join::project_of(pane, &cfg.projects).and_then(|p| readable(&p.name));
+            if let Some(config) = config {
+                if let Err(error) = crate::collect::omo::resolve_runtime_session(pane, config) {
+                    pane.state_labels
+                        .insert("bdi-session-identity".into(), error);
+                }
+            }
+        }
+        let panes = native_panes.as_slice();
         let (focused, left_out): (Vec<Drawn<'_>>, Vec<Drawn<'_>>) = drawn
             .iter()
             .copied()
@@ -835,12 +855,15 @@ impl Collection {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         readers.retain(|project, _| cfg.omo.contains_key(project));
         for (project, work) in &answered {
-            if let Some(config) = cfg.omo.get(*project) {
-                let inputs: Vec<_> = work
-                    .beads
-                    .iter()
-                    .map(|bead| crate::collect::omo::BeadInput::from_bead(*project, bead))
-                    .collect();
+            if !cfg.omo.contains_key(*project) {
+                continue;
+            }
+            let inputs: Vec<_> = work
+                .beads
+                .iter()
+                .map(|bead| crate::collect::omo::BeadInput::from_bead(*project, bead))
+                .collect();
+            let mut batch = if let Some(config) = readable(project) {
                 let entry = readers.entry(project.to_string()).or_insert_with(|| {
                     (
                         config.clone(),
@@ -853,9 +876,15 @@ impl Collection {
                         crate::collect::omo::Reader::new(config.clone()),
                     );
                 }
-                let batch = entry.1.collect(&inputs);
-                activities.extend(batch.activities);
+                entry.1.collect(&inputs)
+            } else {
+                readers.remove(*project);
+                Default::default()
+            };
+            if let Some(policy) = policies.get(project) {
+                policy.add_evidence(&inputs, &mut batch);
             }
+            activities.extend(batch.activities);
         }
         drop(readers);
         // Native ownership belongs to the validated project source rows,
@@ -875,6 +904,9 @@ impl Collection {
                 .unwrap_or_else(|e| e.into_inner());
             history.observe(&activities, now);
             for (key, activity) in &mut activities {
+                if readable(&key.0).is_none() {
+                    continue;
+                }
                 if let Some(bead) = history.beads().get(key) {
                     for observation in &bead.observations {
                         let worker = &observation.activity;
@@ -900,6 +932,48 @@ impl Collection {
                 joined.cover(project, assembled, now);
             }
         }
+        let mut off_focus_workers = BTreeSet::new();
+        if !self.focus.is_empty() {
+            for ((project, id), activity) in &activities {
+                if !self.focus.iter().any(|focus| focus.project == *project)
+                    || !activity.has_active_delegated_worker()
+                {
+                    continue;
+                }
+                let in_focus = focused.iter().any(|(root_project, _, read)| {
+                    read.as_ref().is_ok_and(|tree| {
+                        tree.beads.iter().enumerate().any(|(at, bead)| {
+                            tree.external.get(&at).map_or(*root_project, String::as_str) == project
+                                && bead.id == *id
+                        })
+                    })
+                });
+                if in_focus {
+                    continue;
+                }
+                let eligible = left_out.iter().any(|(root_project, _, read)| {
+                    read.as_ref().is_ok_and(|tree| {
+                        tree.beads.iter().enumerate().any(|(at, bead)| {
+                            tree.external.get(&at).map_or(*root_project, String::as_str) == project
+                                && bead.id == *id
+                                && !bead.status.is_finished()
+                                && !cfg.hide_titles.get(project).is_some_and(|pattern| {
+                                    regex_lite::Regex::new(pattern)
+                                        .ok()
+                                        .is_some_and(|pattern| pattern.is_match(&bead.title))
+                                })
+                                && !cfg
+                                    .fixture_filters
+                                    .get(project)
+                                    .is_some_and(|filter| filter.matches(bead))
+                        })
+                    })
+                });
+                if eligible {
+                    off_focus_workers.insert(snapshot::OffFocusWorker::delegated(project, id));
+                }
+            }
+        }
         let joined = &joined;
         let trees = focused
             .iter()
@@ -921,7 +995,7 @@ impl Collection {
                         // Native workers intentionally need no separate pane.
                         // Preserve concrete join conflicts, but a missing pane
                         // alone is not an orphan claim in this integration.
-                        if cfg.omo.contains_key(&bead.project) {
+                        if readable(&bead.project).is_some() {
                             bead.anomalies.retain(|anomaly| {
                                 !matches!(
                                     anomaly,
@@ -976,6 +1050,7 @@ impl Collection {
             now,
         );
         snapshot.out_of_focus = out_of_focus;
+        snapshot.off_focus_workers = off_focus_workers.into_iter().collect();
         Ok(snapshot)
     }
 
@@ -1368,6 +1443,134 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Condvar, Mutex};
     use std::time::Duration;
+
+    #[test]
+    fn work_policy_gates_native_activity_on_each_snapshot_without_dropping_dependencies() {
+        use crate::collect::omo::ActivityState;
+        use std::fs;
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        struct Ground(PathBuf);
+        impl Drop for Ground {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove private work policy fixture");
+            }
+        }
+        let path = std::env::temp_dir().join(format!("bdi-work-policy-{}", std::process::id()));
+        fs::create_dir(&path).unwrap();
+        let root = Ground(path.canonicalize().unwrap());
+        let project = root.0.join("dunwich");
+        let tasks = root.0.join("tasks");
+        let task_alias = root.0.join("task-link");
+        let executable = root.0.join("work-cli");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&tasks).unwrap();
+        symlink(&tasks, &task_alias).unwrap();
+        let script = |source: &str| {
+            fs::write(&executable, source).unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        script("#!/bin/sh\n[ \"$#:$1\" = 1:policy ] && exec /bin/cat decision.json\n");
+        let cfg = Config::from_toml(&format!(
+            r#"
+[[projects]]
+name = "dunwich"
+path = {project:?}
+[omo.dunwich]
+task_directory = {task_alias:?}
+runtime_directory = {runtime:?}
+work_policy_executable = {executable:?}
+"#,
+            runtime = root.0.join("missing-runtime")
+        ))
+        .unwrap();
+        let trackers = dunwich_with(dunwich_holding(
+            r#"[
+              {"id":"dun-7","title":"raise the mast","status":"in_progress","issue_type":"epic",
+               "metadata":{"qrclipWork":{"attempt":{"id":"attempt-1","coordinator":"owner-1"}},
+                "qrclipDispatch":{"attemptId":"attempt-1","taskId":"task-1","childSession":"worker-1","nativeStatus":"running"}}},
+              {"id":"dun-7.1","title":"fit the beam","status":"open","issue_type":"task",
+               "dependencies":[{"depends_on_id":"dun-7","type":"parent-child"}]}
+            ]"#,
+        ));
+        let mut seat = named(
+            pane("w:p1", project.to_str().unwrap(), PaneStatus::Working),
+            "dun-7",
+        );
+        seat.app = Some("omo".into());
+        seat.agent = Some("omo".into());
+        seat.agent_session = Some(crate::model::types::AgentSession {
+            agent: "omo".into(),
+            kind: "id".into(),
+            source: "herdr:process-argv".into(),
+            value: "launch-owner".into(),
+        });
+        let panes = Provider::holding(vec![seat]);
+        fs::write(
+            tasks.join("task-1.json"),
+            serde_json::json!({
+                "task_id":"task-1","parent_session_id":"owner-1","child_session_id":"worker-1",
+                "status":"running","updated_at":Utc::now().to_rfc3339()
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut collection = Collection::default();
+        for (identity, level, reason, allowed) in [
+            (project.as_path(), "observation", None, true),
+            (project.as_path(), "disabled", Some("outside scope"), false),
+            (
+                root.0.as_path(),
+                "delegation",
+                Some("does not match"),
+                false,
+            ),
+        ] {
+            fs::write(
+                project.join("decision.json"),
+                serde_json::json!({
+                    "version":1,"project":identity,"level":level,"source":"project","reason":reason
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let snapshot = collection.collect(
+                &cfg,
+                &panes,
+                &trackers,
+                &Wanted::Everything,
+                Filter::All,
+                Utc::now(),
+            );
+            let tree = tree_of(&snapshot, "dunwich");
+            assert_eq!(
+                tree.beads
+                    .iter()
+                    .map(|bead| bead.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["dun-7", "dun-7.1"]
+            );
+            let bead = node(tree, "dun-7");
+            let activity = bead.activity.as_ref().unwrap();
+            let has = |text: &str| activity.evidence.iter().any(|entry| entry.contains(text));
+            if allowed {
+                assert_eq!(activity.state, ActivityState::Working, "{activity:?}");
+                assert!(has("observation (project)"));
+                assert!(has("live identity unavailable"));
+            } else {
+                assert_eq!(activity.state, ActivityState::Unknown);
+                assert_eq!(activity.task_id, None);
+                assert!(has(reason.unwrap()), "{activity:?}");
+                assert!(!has("observed worker history"));
+                assert_eq!(
+                    bead.agent
+                        .as_ref()
+                        .and_then(|agent| agent.agent_session.as_deref()),
+                    Some("launch-owner")
+                );
+            }
+        }
+    }
 
     /// Every way a collection can be asked for, named where a test that reads
     /// the sources can enumerate them.
@@ -2576,6 +2779,38 @@ mod tests {
             snap.speaks_until,
             BTreeMap::from([("dunwich".to_string(), when_it_is_due())])
         );
+    }
+
+    #[test]
+    fn a_redraw_reads_updated_pane_captions_without_a_tracker_refresh() {
+        let cfg = one_project();
+        let trackers = dunwich();
+        let provider = |caption| {
+            Provider::holding(vec![
+                titled(pane("w:p1", DUNWICH, PaneStatus::Working), caption),
+                titled(pane("w:p9", DUNWICH, PaneStatus::Idle), caption),
+            ])
+        };
+        let mut standing = Collection::default();
+        let before = standing.collect(
+            &cfg,
+            &provider("first goal"),
+            &trackers,
+            &Wanted::Everything,
+            Filter::All,
+            now(),
+        );
+        let tracker_calls = asked_of(&trackers, "dunwich");
+        let after = standing.redraw(&cfg, &provider("next goal"), &trackers, Filter::All, now());
+        assert_eq!(asked_of(&trackers, "dunwich"), tracker_calls);
+        for (snapshot, expected) in [(&before, "first goal"), (&after, "next goal")] {
+            let joined = node(tree_of(snapshot, "dunwich"), "dun-7.1")
+                .agent
+                .as_ref()
+                .expect("joined pane");
+            assert_eq!(joined.title.as_deref(), Some(expected));
+            assert_eq!(snapshot.unattributed[0].title.as_deref(), Some(expected));
+        }
     }
 
     /// A heartbeat renews a lease without moving the fingerprint, so a read

@@ -6,6 +6,46 @@ use terminal::shims::ShimmedTracker;
 use terminal::{a_home_naming_one_project_settled, ENTER_ALTERNATE_SCREEN};
 
 #[test]
+fn active_headless_worker_counts_without_an_observer() {
+    use serde_json::json;
+    use std::fs;
+    let home = a_home_naming_one_project_settled("legacy-live-tree", "");
+    let tasks = home.join("native-tasks");
+    fs::create_dir(&tasks).unwrap();
+    let cfg = home.join(".config/beady-eye/config.toml");
+    let mut config = fs::read_to_string(&cfg).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\n",
+        tasks.display()
+    ));
+    fs::write(cfg, config).unwrap();
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(&json!([{
+        "id":"ark-legacy","title":"Inventory","status":"in_progress","priority":2,"issue_type":"task",
+        "metadata":{"qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                    "qrclipDispatch":{"attemptId":"attempt-a","taskId":"st_legacy","childSession":"child-a"}}
+    }]).to_string());
+    for (status, expected_count) in [("running", 1), ("completed", 0)] {
+        fs::write(tasks.join("st_legacy.json"), json!({"task_id":"st_legacy","status":status,
+            "parent_session_id":"owner-a","child_session_id":"child-a","updated_at":chrono::Utc::now()}).to_string()).unwrap();
+        let result = terminal::bdi_on_pipes(&home)
+            .args(["--all", "--json"])
+            .envs(tracker.environment())
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{:?}", result.stderr);
+        let snapshot: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        let tree = &snapshot["trees"][0];
+        assert_eq!(
+            tree["nodes"][0]["agent_live"],
+            expected_count == 1,
+            "{status}"
+        );
+        assert_eq!(tree["counts"]["live_agents"], expected_count, "{status}");
+    }
+}
+
+#[test]
 fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
     for colour_brackets in [true, false] {
         for cols in [30, 40, 60, 80] {
@@ -99,6 +139,249 @@ fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
             bdi.send(b"q");
         }
     }
+}
+
+#[test]
+fn focused_tree_offers_activity_navigation_to_an_active_worker_outside_focus() {
+    let home = a_home_naming_one_project_settled(
+        "focused-tree-off-focus-activity",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&observations).unwrap();
+    let config_path = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    std::fs::write(config_path, config).unwrap();
+
+    let now = chrono::Utc::now();
+    let created = "2026-01-01T00:00:00Z";
+    std::fs::write(
+        tasks.join("st_active_worker.json"),
+        serde_json::json!({
+            "task_id":"st_active_worker","created_at":created,"updated_at":now,
+            "status":"running","parent_session_id":"invented-coordinator",
+            "child_session_id":"invented-worker"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let observation_path = observations.join("frame-focused-tree.json");
+    let mut observation = serde_json::json!({
+        "version":1,
+        "scope":{"project":"arkham","taskDirectory":tasks},
+        "epoch":"invented-epoch","sequence":1,"observedAt":now,
+        "expiresAt":now + chrono::Duration::seconds(5),
+        "admissions":[{
+            "bead":"ark-worker","attempt":"invented-attempt",
+            "toolCall":"invented-call","task":"st_active_worker",
+            "parent":"invented-coordinator","created":created,
+            "initialChild":null,"invalid":false
+        }],
+        "workers":[{
+            "session":"invented-worker","identity":"host:invented:worker",
+            "model":"invented/gpt-6-luna","presence":"live_busy",
+            "execution":"active","source":"authenticated-host-baseline",
+            "observedAt":now,"task":"st_active_worker",
+            "parent":"invented-coordinator","created":created,
+            "child":"invented-worker"
+        }]
+    });
+    std::fs::write(&observation_path, observation.to_string()).unwrap();
+
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(&serde_json::json!([
+        {
+            "id":"ark-focus-root","title":"Invented focused integration",
+            "status":"in_progress","priority":1,"issue_type":"epic"
+        },
+        {
+            "id":"ark-focus-child","title":"Invented focused check",
+            "status":"open","priority":2,"issue_type":"task","parent":"ark-focus-root",
+            "dependencies":[{"depends_on_id":"ark-focus-root","type":"parent-child"}]
+        },
+        {
+            "id":"ark-worker","title":"Invented delegated worker bead",
+            "status":"in_progress","priority":2,"issue_type":"task",
+            "metadata":{
+                "qrclipWork":{"attempt":{
+                    "id":"invented-attempt","coordinator":"invented-coordinator","mode":"delegate"
+                }},
+                "qrclipDispatch":{
+                    "attemptId":"invented-attempt","taskId":"st_active_worker",
+                    "toolCallId":"invented-call","outcome":"native-admitted"
+                }
+            }
+        }
+    ]).to_string());
+
+    let json = terminal::bdi_on_pipes(&home)
+        .args(["ark-focus-root", "--all", "--json"])
+        .envs(tracker.environment())
+        .output()
+        .unwrap();
+    assert!(
+        json.status.success(),
+        "focused --json invocation succeeds: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let snapshot: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        snapshot["off_focus_workers"],
+        serde_json::json!([{
+            "project":"arkham","id":"ark-worker",
+            "role":"delegated_worker","execution":"active"
+        }])
+    );
+
+    let refreshed_at = chrono::Utc::now();
+    observation["observedAt"] = serde_json::json!(refreshed_at);
+    observation["expiresAt"] = serde_json::json!(refreshed_at + chrono::Duration::seconds(5));
+    observation["workers"][0]["observedAt"] = serde_json::json!(refreshed_at);
+    std::fs::write(&observation_path, observation.to_string()).unwrap();
+
+    let mut bdi = Driven::bdi_with_arguments(
+        36,
+        140,
+        home,
+        &["--all", "ark-focus-root"],
+        &tracker.environment(),
+    );
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"v Activity", GIVING_UP);
+    let repaint = bdi.resize(37, 140);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let rows = terminal::rows_drawn(&screen);
+    let text = rows.join("\n");
+    assert!(
+        text.contains("Invented focused integration"),
+        "the requested integration tree stays focused: {text}"
+    );
+    assert!(
+        !text.contains("Invented delegated worker bead"),
+        "the off-focus worker stays outside the focused tree: {text}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains('1') && row.contains("Home") && row.contains("v Activity")),
+        "the off-focus count notice truthfully offers Home and Activity navigation: {text}"
+    );
+
+    let home = bdi.send(b"\x1b[H");
+    bdi.answer_to(home, GIVING_UP);
+    let activity = bdi.send(b"v");
+    bdi.answer_to(activity, GIVING_UP);
+    let repaint = bdi.resize(38, 140);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("Invented delegated worker bead"),
+        "Activity navigation reveals the qualified active worker bead: {text}"
+    );
+    bdi.send(b"q");
+}
+
+#[test]
+fn settled_delegate_is_identifiable_without_a_live_observer_frame() {
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::fs;
+
+    let home = a_home_naming_one_project_settled(
+        "settled-delegate-without-frame",
+        "[row]\ncompact=true\nshow_ids=false\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    fs::create_dir_all(&tasks).unwrap();
+    fs::create_dir_all(&observations).unwrap();
+    let cfg = home.join(".config/beady-eye/config.toml");
+    let mut config = fs::read_to_string(&cfg).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    fs::write(cfg, config).unwrap();
+    let created = "2026-01-01T00:00:00Z";
+    let scope = json!({"project":"arkham","taskDirectory":tasks});
+    let parent = "invented-preparer";
+    let cache_key = serde_json::to_vec(&(&scope, parent)).unwrap();
+    let cache_hash: String = Sha256::digest(cache_key)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    fs::write(
+        observations.join(format!("admission-{cache_hash}.json")),
+        json!({
+            "version":1,"scope":scope,"parent":parent,
+            "admissions":[{
+                "bead":"ark-audit","attempt":"invented-attempt","toolCall":"invented-call",
+                "task":"st_audit","parent":parent,"created":created,
+                "initialChild":"invented-auditor","invalid":false,"runEpoch":3
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        tasks.join("st_audit.json"),
+        json!({
+            "task_id":"st_audit","created_at":created,"updated_at":chrono::Utc::now(),
+            "status":"completed","parent_session_id":parent,
+            "child_session_id":"invented-auditor","notification":{"run_epoch":3}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(
+        &json!([{
+            "id":"ark-audit","title":"Invented finished audit","status":"in_progress",
+            "priority":2,"issue_type":"task","metadata":{
+                "qrclipWork":{"attempt":{"id":"invented-attempt","coordinator":parent,"mode":"delegate"}},
+                "qrclipDispatch":{
+                    "attemptId":"invented-attempt","taskId":"st_audit","toolCallId":"invented-call",
+                    "outcome":"native-admitted"
+                }
+            }
+        }])
+        .to_string(),
+    );
+    let result = terminal::bdi_on_pipes(&home)
+        .args(["--json", "--all", "ark-audit"])
+        .envs(tracker.environment())
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{:?}", result.stderr);
+    let snapshot: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let node = &snapshot["trees"][0]["nodes"][0];
+    assert_eq!(node["id"], "ark-audit");
+    assert_eq!(node["activity"]["child_session"], "invented-auditor");
+    assert_eq!(node["execution"], "inactive");
+    assert_eq!(node["agent_live"], false);
+    assert_eq!(node["activity"]["acceptance_ready"], false);
+
+    let mut bdi = Driven::bdi_with_arguments(40, 120, home, &["--all"], &tracker.environment());
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"audit", GIVING_UP);
+    let selected = bdi.send(b"/ark-audit\r");
+    bdi.answer_to(selected, GIVING_UP);
+    let open = bdi.send(b"\r");
+    bdi.answer_to(open, GIVING_UP);
+    let repaint = bdi.resize(42, 120);
+    let frame = bdi.answer_to(repaint, GIVING_UP);
+    assert_eq!(terminal::window_over(&frame).as_deref(), Some("ark-audit"));
+    let screen = terminal::rows_drawn(&frame).join("\n");
+    assert!(screen.contains("invented-auditor"), "{screen}");
+    assert!(screen.contains("Inactive"), "{screen}");
+    bdi.send(b"\x1bq");
 }
 
 #[test]
@@ -283,4 +566,221 @@ fn live_native_owners_are_visible_on_beads_and_open_their_linked_details() {
         assert_eq!(terminal::window_over(&screen).as_deref(), Some("ark-2"));
         app.send(b"\x1bq");
     }
+}
+
+#[test]
+fn future_observation_draws_idle_headless_worker_and_preserves_detail_identity() {
+    let home = a_home_naming_one_project_settled(
+        "observed-headless-idle",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&observations).unwrap();
+    let cfg = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&cfg).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    std::fs::write(cfg, config).unwrap();
+    let now = chrono::Utc::now();
+    std::fs::write(
+        tasks.join("st_future.json"),
+        serde_json::json!({
+            "task_id":"st_future","created_at":"2026-01-01T00:00:00Z",
+            "updated_at":now,"status":"running","parent_session_id":"owner-a",
+            "child_session_id":"child-new"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        observations.join("frame-test.json"),
+        serde_json::json!({
+            "version":1,
+            "scope":{"project":"arkham","taskDirectory":tasks},
+            "epoch":"epoch-a","sequence":1,"observedAt":now,
+            "expiresAt":now + chrono::Duration::seconds(3),
+            "admissions":[{
+                "bead":"ark-future","attempt":"attempt-a","toolCall":"call-a",
+                "task":"st_future","parent":"owner-a",
+                "created":"2026-01-01T00:00:00Z","initialChild":null,"invalid":false
+            }],
+            "workers":[{
+                "task":"st_future","parent":"owner-a",
+                "created":"2026-01-01T00:00:00Z","child":"child-new",
+                "session":"child-new","identity":"host:instance-a:child-new",
+                "model":"invented/gpt-6-luna","presence":"live_idle",
+                "execution":"inactive","source":"authenticated-host-baseline",
+                "observedAt":now
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(
+        &serde_json::json!([{
+            "id":"ark-future","title":"Idle gateway worker","status":"in_progress",
+            "priority":2,"issue_type":"task",
+            "metadata":{
+                "qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                "qrclipDispatch":{
+                    "attemptId":"attempt-a","taskId":"st_future","toolCallId":"call-a",
+                    "outcome":"native-admitted"
+                }
+            }
+        }])
+        .to_string(),
+    );
+    let mut bdi = Driven::bdi(32, 120, home, &tracker.environment());
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"idle", GIVING_UP);
+    let mark = bdi.resize(33, 120);
+    let screen = bdi.answer_to(mark, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(text.contains("Luna") && text.contains("idle"), "{text}");
+    assert!(
+        !text.contains("trees with no live agent"),
+        "idle headless worker should keep tree live: {text}"
+    );
+    assert!(
+        !text.contains("nobody is working"),
+        "pane absence is not work absence: {text}"
+    );
+    let mark = bdi.send(b"/ark-future\r");
+    bdi.answer_to(mark, GIVING_UP);
+    let mark = bdi.send(b"\r");
+    bdi.answer_to(mark, GIVING_UP);
+    let mark = bdi.resize(45, 120);
+    let screen = bdi.answer_to(mark, GIVING_UP);
+    assert_eq!(
+        terminal::window_over(&screen).as_deref(),
+        Some("ark-future")
+    );
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("LiveIdle") && text.contains("Inactive"),
+        "{text}"
+    );
+    assert!(
+        text.contains("child-new"),
+        "worker session must be individually identifiable: {text}"
+    );
+    bdi.send(b"\x1bq");
+}
+
+#[test]
+fn headless_worker_identity_remains_visible_when_only_coordinator_is_live() {
+    use terminal::shims::ShimmedHerdr;
+
+    let home = a_home_naming_one_project_settled(
+        "unknown-headless-worker-live-coordinator",
+        "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+    );
+    let tasks = home.join("native-tasks");
+    let observations = home.join("observations");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&observations).unwrap();
+    let config_path = home.join(".config/beady-eye/config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        "\n[omo.arkham]\ntask_directory='{}'\nobservation_directory='{}'\n",
+        tasks.display(),
+        observations.display()
+    ));
+    std::fs::write(&config_path, config).unwrap();
+
+    let now = chrono::Utc::now();
+    let created = "2026-01-01T00:00:00Z";
+    std::fs::write(
+        tasks.join("st_headless.json"),
+        serde_json::json!({
+            "task_id":"st_headless","created_at":created,"updated_at":now,"status":"running",
+            "parent_session_id":"owner-a","child_session_id":"child-known",
+            "name":"Invented leaf reviewer","agent_type":"reviewer",
+            "effective_model":{"provider":"invented","model_id":"gpt-6-luna"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        observations.join("frame-test.json"),
+        serde_json::json!({
+            "version":1,
+            "scope":{"project":"arkham","taskDirectory":tasks},
+            "epoch":"epoch-a","sequence":1,"observedAt":now,
+            "expiresAt":now + chrono::Duration::seconds(3),
+            "admissions":[{
+                "bead":"ark-headless","attempt":"attempt-a","toolCall":"call-a",
+                "task":"st_headless","parent":"owner-a","created":created,
+                "initialChild":null,"invalid":false
+            }],
+            "workers":[]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let tracker = ShimmedTracker::beside(&home);
+    tracker.holds(
+        &serde_json::json!([{
+            "id":"ark-headless","title":"Invented delegated work","status":"in_progress",
+            "priority":2,"issue_type":"task",
+            "metadata":{
+                "qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                "qrclipDispatch":{
+                    "attemptId":"attempt-a","taskId":"st_headless","toolCallId":"call-a",
+                    "outcome":"native-admitted"
+                }
+            }
+        }])
+        .to_string(),
+    );
+
+    let herdr = ShimmedHerdr::beside(&home);
+    let configured: toml::Value = toml::from_str(
+        &std::fs::read_to_string(home.join(".config/beady-eye/config.toml")).unwrap(),
+    )
+    .unwrap();
+    let cwd = configured["projects"][0]["path"].as_str().unwrap();
+    herdr.holds_in(
+        "default",
+        &serde_json::json!({"result":{"agents":[{
+            "pane_id":"w:p1","cwd":cwd,"agent_status":"working","agent":"pi",
+            "title":"Invented coordinator",
+            "agent_session":{"agent":"pi","kind":"id","source":"invented","value":"owner-a"}
+        }]}})
+        .to_string(),
+    );
+    let mut env = tracker.environment();
+    env.extend(herdr.environment());
+    let mut bdi = Driven::bdi(32, 120, home, &env);
+    bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+    bdi.read_until(b"coord live", GIVING_UP);
+    let repaint = bdi.resize(33, 120);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let text = terminal::rows_drawn(&screen).join("\n");
+    assert!(
+        text.contains("worker Invented leaf reviewer · coord live · ?"),
+        "the row must identify the headless worker without attributing the coordinator's presence to it: {text}"
+    );
+
+    let search = bdi.send(b"/ark-headless\r");
+    bdi.answer_to(search, GIVING_UP);
+    let detail = bdi.send(b"\r");
+    bdi.answer_to(detail, GIVING_UP);
+    let repaint = bdi.resize(45, 120);
+    let screen = bdi.answer_to(repaint, GIVING_UP);
+    let details = terminal::rows_drawn(&screen).join("\n");
+    assert_eq!(
+        terminal::window_over(&screen).as_deref(),
+        Some("ark-headless")
+    );
+    assert!(details.contains("child-known"), "{details}");
+    assert!(details.contains("Execution: Unknown"), "{details}");
+    bdi.send(b"\x1bq");
 }

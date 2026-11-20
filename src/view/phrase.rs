@@ -95,6 +95,17 @@ fn redacted(failure: &TrackerFailure) -> &'static str {
 /// they can no longer see, or how stale what they are looking at may be.
 pub fn notice(notice: &Notice) -> String {
     match notice {
+        Notice::OffFocusActivity(count, direct) => {
+            let key = if *direct {
+                "v Activity"
+            } else {
+                "Home, v Activity"
+            };
+            format!(
+                "{count} off-focus active bead{} · {key}",
+                if *count == 1 { "" } else { "s" }
+            )
+        }
         Notice::AgentsUnknown => "no herdr session · agents are not shown".to_string(),
         Notice::SessionUnanswered(session) => {
             format!("herdr session {session} did not answer · its agents are not shown")
@@ -132,6 +143,17 @@ pub fn notice(notice: &Notice) -> String {
 /// what the fact costs the reader.
 pub fn brief_notice(notice: &Notice) -> String {
     match notice {
+        Notice::OffFocusActivity(count, direct) => {
+            let key = if *direct {
+                "v Activity"
+            } else {
+                "Home, v Activity"
+            };
+            format!(
+                "{count} off-focus bead{} · {key}",
+                if *count == 1 { "" } else { "s" }
+            )
+        }
         Notice::AgentsUnknown => "agents unknown".to_string(),
         // The session's name is what survives the cut: which session's
         // agents are unknown is the whole of what the reader can act on.
@@ -727,7 +749,7 @@ pub fn no_bead_to_tail() -> &'static str {
 }
 
 pub fn no_agent_to_tail() -> &'static str {
-    "no pane · nobody is working this bead"
+    "no pane · press Enter for bead details"
 }
 
 pub fn no_session_to_tail() -> &'static str {
@@ -741,7 +763,7 @@ pub fn no_session_to_tail() -> &'static str {
 /// they do not recognise would read as something broken. What it says instead
 /// is what the run is, which is a whole answer rather than a loss.
 pub fn no_provider_to_tail() -> &'static str {
-    "no agents to show · reading beads only"
+    "no pane to show · select a bead for details"
 }
 
 /// That the pane the selection points at is being read and has not answered

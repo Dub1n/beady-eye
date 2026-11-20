@@ -5,6 +5,17 @@ are ready to submit or that the maintainer has agreed to them. Each proposal mus
 stand on its own against upstream, with its own rationale, tests and CI evidence.
 The fork can continue evolving while individual proposals are prepared.
 
+## Fork-only integration: guarded checks and opt-in recording
+
+Keep the optional [writer](docs/work-integration.md), project policy and
+OmO work adapter independent from the passive viewer. A sealed archive
+protects the archived copies; it does not freeze the checkout. Qualify
+the specific consumer fixture and cleanup separately. Any proposal for
+this work needs the operator-pinned distribution, real CLI/OmO tests,
+and compatibility with existing work records. Keep the capture scheduler
+fork-side; reports consume observations, not a reconstructed activity log.
+No upstream submission is implied by publishing these sources in the fork.
+
 Reviewed on 2026-11-14 against upstream
 `6cebfddd045ee6468ed06b6deb77b4748d536a3d` and fork
 `a4098292bd9b61e9557b1b5f89400c4fc30e1f7a` (0.42.2). Upstream's current head matched
@@ -515,6 +526,24 @@ in `src/app/collection.rs`, snapshot activity fields and execution details.
 **Maintenance implication:** An accepted small extension point plus a separately
 maintained adapter could reduce core conflicts, but adds a contract to maintain.
 Assess that trade-off before building a framework around one integration.
+
+The fork's [observer evidence limits](adapters/omo-observer/README.md#evidence-and-limits)
+summarize the finite hosted, in-process and detached-process checks. Extract
+the adapter contract before selecting any provider for upstream. Keep
+prospective admissions, expiring current observations and retained settled
+identity separate; none confers an acceptance or preview-routing guarantee.
+
+**Fork regression coverage:** A current headless worker can count toward the
+project total without the optional observer, but an execution state alone is
+not observed presence for a collapsed branch. Retain both cases and keep
+coordinator panes distinct from a worker's identity when extracting this work.
+
+**Independent pane-refresh follow-up:** A bounded 30-second refresh of pane
+metadata keeps captions current when an external producer stands down tracker
+polling. It neither polls trackers nor answers a pending focus change. Extract
+it independently of the native provider. Review the interval and provider call
+cost before changing upstream defaults; retain the covered-project, bounded
+queue and focus-ordering tests.
 
 **0.44.0 follow-up to proposal 9:** Missing models can be recovered passively from
 exact native worker sessions or an explicitly configured coordinator directory.

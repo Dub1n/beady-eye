@@ -50,6 +50,16 @@ pub(super) fn notices(snapshot: &Snapshot, standing: &[Notice]) -> Vec<Notice> {
 
     collected
         .into_iter()
+        .chain(
+            (!snapshot.off_focus_workers.is_empty()).then_some(Notice::OffFocusActivity(
+                snapshot.off_focus_workers.len(),
+                matches!(
+                    snapshot.filter,
+                    crate::model::snapshot::Filter::CurrentWork
+                        | crate::model::snapshot::Filter::LiveAgents
+                ),
+            )),
+        )
         .chain(unanswered)
         .chain(guessed)
         .chain(read_here)

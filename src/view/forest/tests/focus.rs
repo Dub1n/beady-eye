@@ -1477,6 +1477,62 @@ fn no_agent_group_obeys_completed_toggle_and_never_leaves_excluded_placeholders(
 }
 
 #[test]
+fn hiding_completed_after_refresh_does_not_pin_an_already_closed_selection() {
+    let rows = r#"[
+        {"id":"hbr-1","title":"Restore harbour","status":"open"},
+        {"id":"hbr-1.1","title":"Completed survey","status":"closed",
+         "dependencies":[{"depends_on_id":"hbr-1","type":"parent-child"}]}
+    ]"#;
+    let source = gather(
+        vec![tree_of("dunwich", rows)],
+        Vec::new(),
+        Filter::CurrentWork,
+    );
+    let mut forest = flatten_compact(source.clone());
+    forest.apply(Action::ToggleCompleted);
+    forest.apply(Action::ExpandForest);
+    select_bead(&mut forest, "hbr-1.1");
+    forest.refresh(source);
+    assert_eq!(forest.preserve_completed, None);
+    forest.apply(Action::ToggleCompleted);
+    assert!(
+        !drawn_here(&forest, "Completed survey"),
+        "{:?}",
+        sketch(&forest)
+    );
+}
+
+#[test]
+fn all_toggle_returns_to_the_previous_scope_after_refresh() {
+    for scope in [Filter::CurrentWork, Filter::Activity, Filter::LiveAgents] {
+        let source = gather(vec![tree_of("dunwich", DUNWICH)], Vec::new(), scope);
+        let mut forest = flatten_compact(source.clone());
+        forest.apply(Action::ToggleFilter);
+        assert_eq!(forest.snapshot().filter, Filter::All);
+        forest.refresh(source);
+        forest.apply(Action::ToggleFilter);
+        assert_eq!(forest.snapshot().filter, scope);
+    }
+}
+
+#[test]
+fn all_toggle_twice_keeps_unstaffed_current_work_in_the_main_tree() {
+    let rows = r#"[{"id":"hbr-3","title":"Survey the harbour","status":"open"}]"#;
+    let source = gather(
+        vec![tree_of("dunwich", rows)],
+        Vec::new(),
+        Filter::CurrentWork,
+    );
+    let mut forest = flatten_compact(source);
+    forest.apply(Action::ToggleFilter);
+    forest.apply(Action::ToggleFilter);
+    assert!(drawn_here(&forest, "Survey the harbour"));
+    assert!(!sketch(&forest)
+        .iter()
+        .any(|line| line.contains("[HiddenTrees]")));
+}
+
+#[test]
 fn completed_selection_can_be_collapsed_and_stays_collapsed_after_refresh() {
     for dependencies in [false, true] {
         for focused in [false, true] {

@@ -340,6 +340,7 @@ pub fn build(
         unanswered_by_the_watcher: Vec::new(),
         collected: trees,
         out_of_focus: BTreeSet::new(),
+        off_focus_workers: Vec::new(),
         read_at,
         speaks_until,
         projects: cfg.read().map(|p| p.name.clone()).collect(),

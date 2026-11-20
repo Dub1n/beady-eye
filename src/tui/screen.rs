@@ -1948,6 +1948,7 @@ mod tests {
             speaks_until: BTreeMap::new(),
             collected: trees,
             out_of_focus: BTreeSet::new(),
+            off_focus_workers: Vec::new(),
             projects: vec!["grove".to_string()],
             views: Vec::new(),
             scope: Scope::default(),
@@ -5020,8 +5021,8 @@ mod tests {
             rows[19].contains("w:p1"),
             "the rule and the pane under it take twenty rows of forty: {rows:?}"
         );
-        assert!(rows[20].starts_with("  line 12 "), "{rows:?}");
-        assert!(rows[38].starts_with("  line 30 "), "{rows:?}");
+        assert!(rows[20].starts_with("line 12 "), "{rows:?}");
+        assert!(rows[38].starts_with("line 30 "), "{rows:?}");
         assert!(rows[39].contains("q quit"));
     }
 
@@ -5045,7 +5046,7 @@ mod tests {
             "the rule naming the pane opens the tail's band: {rows:?}"
         );
         assert!(
-            rows[(bands.keys.y - 1) as usize].starts_with("  rebuilt .#larkspur"),
+            rows[(bands.keys.y - 1) as usize].starts_with("rebuilt .#larkspur"),
             "the pane's newest line sits on the band's last row: {rows:?}"
         );
         assert!(
