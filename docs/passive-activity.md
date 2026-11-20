@@ -12,6 +12,21 @@ from the [work writer](work-integration.md). Build and verify one local
 release as described in [local work distribution](local-work-distribution.md).
 Starting `bdi` does not activate the writer or change its project policy.
 
+## Interpreting a focused tree
+
+A focus limits which tree is drawn, not which project owns the work. When
+a qualified delegated worker is active on another bead in the same project,
+the footer counts the affected beads and shows how to reach Activity. The
+focused tree stays in place. Focused JSON exposes the same qualified rows
+as `off_focus_workers`; it is not a process count.
+
+A current worker observation is needed to report live execution. A matching
+retained admission can identify a **settled** worker after its frame expires,
+but it does not establish presence, acceptance, or activity at an earlier
+sample. An active coordinator does not make all its assigned beads active.
+See [recording a short observation](coordination-trial.md) for what the
+recorder captures and what a missed interval cannot establish.
+
 The Herdr plugin builds this fork's source using Rust 1.88 or newer:
 
 ```sh

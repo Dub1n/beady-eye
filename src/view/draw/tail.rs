@@ -225,7 +225,7 @@ mod tests {
             tail_frame(&Tail::Silent(phrase::no_agent_to_tail()), 40, 3, 0).rows(),
             vec![
                 "────────────────────────────────────────",
-                "  no pane · nobody is working this bead ",
+                "  no pane · press Enter for bead details",
                 "                                        ",
             ]
         );

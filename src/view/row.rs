@@ -44,6 +44,57 @@ fn live_state(node: &Node) -> Option<String> {
     use crate::collect::omo::ExecutionState;
     use crate::model::{join::JoinSource, types::PaneStatus};
     let execution = node.execution_state();
+    // A worker's own fresh observation takes priority over a coordinator pane's
+    // activity. The coordinator remains independently linked in the details.
+    if let Some(activity) = &node.activity {
+        use crate::collect::omo::PresenceState;
+        match activity.presence_state() {
+            PresenceState::LiveIdle => {
+                return Some(
+                    if execution == ExecutionState::Unknown {
+                        "idle · ?"
+                    } else {
+                        "idle"
+                    }
+                    .into(),
+                )
+            }
+            PresenceState::LiveBusy => {
+                return Some(
+                    match execution {
+                        ExecutionState::Active => "active",
+                        ExecutionState::Inactive => "live",
+                        ExecutionState::Unknown => "live · ?",
+                    }
+                    .into(),
+                )
+            }
+            PresenceState::Unknown => {}
+        }
+        if node.agent.is_none() {
+            if let Some(presence) = activity
+                .coordinator_presence
+                .filter(|p| *p != PresenceState::Unknown)
+            {
+                let role = if activity.worker_type.as_deref() == Some("direct") {
+                    "owner"
+                } else {
+                    "coord"
+                };
+                let state = if presence == PresenceState::LiveIdle {
+                    "idle"
+                } else {
+                    "live"
+                };
+                let unknown = if execution == ExecutionState::Unknown {
+                    " · ?"
+                } else {
+                    ""
+                };
+                return Some(format!("{role} {state}{unknown}"));
+            }
+        }
+    }
     let Some(agent) = &node.agent else {
         return (execution == ExecutionState::Active).then(|| "active".into());
     };
@@ -498,6 +549,42 @@ pub fn cells(
         status: node.status.clone(),
         activity: node.activity.clone(),
         activity_model: node.activity.as_ref().and_then(|a| {
+            if a.presence_state() != crate::collect::omo::PresenceState::Unknown {
+                return a
+                    .model_label()
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        a.child_session
+                            .as_ref()
+                            .map(|id| format!("worker {}", id.chars().take(8).collect::<String>()))
+                    })
+                    .or_else(|| {
+                        (!a.workers.is_empty()).then(|| format!("{} workers", a.workers.len()))
+                    });
+            }
+            let worker_identity = || {
+                a.worker_name
+                    .as_deref()
+                    .filter(|name| !name.is_empty())
+                    .map(|name| format!("worker {name}"))
+                    .or_else(|| {
+                        a.child_session
+                            .as_deref()
+                            .map(|id| format!("worker {}", id.chars().take(8).collect::<String>()))
+                    })
+            };
+            if a.coordinator_presence
+                .is_some_and(|p| p != crate::collect::omo::PresenceState::Unknown)
+                && node.agent.is_none()
+            {
+                return worker_identity().or_else(|| {
+                    a.coordinator_model_label().map(str::to_owned).or_else(|| {
+                        a.coordinator
+                            .as_ref()
+                            .map(|id| format!("agent {}", id.chars().take(8).collect::<String>()))
+                    })
+                });
+            }
             if node.agent.as_ref().is_some_and(|agent| {
                 agent.source == crate::model::join::JoinSource::NativeCoordinator
             }) {
@@ -507,6 +594,9 @@ pub fn cells(
                         .map(|id| format!("coord {}", id.chars().take(8).collect::<String>()))
                 });
                 if !a.workers.is_empty() {
+                    if let Some(worker) = worker_identity() {
+                        return Some(worker);
+                    }
                     match (a.model_label(), coordinator) {
                         (Some(worker), Some(coord)) => Some(format!("worker {worker} / {coord}")),
                         (Some(worker), None) => Some(format!("worker {worker}")),
@@ -699,6 +789,56 @@ mod tests {
             depends_on: Vec::new(),
             blocks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn headless_idle_presence_survives_inactive_execution_and_deduplicates_shared_workers() {
+        use crate::collect::omo::{Activity, ExecutionState, PresenceState};
+        let mut n = node("fruit-1", Status::InProgress);
+        let a: Activity=serde_json::from_value(serde_json::json!({"state":"Unknown","project":"summit-works","bead_id":"fruit-1","attempt_id":"attempt-a","child_session":"child-a","effective_model":"invented/gpt-6-luna","fresh":true,"acceptance_ready":false,"evidence":[],"worker_presence":"live_idle","worker_execution":"inactive","worker_identity":"process:instance-a"})).unwrap();
+        n.activity = Some(a);
+        assert!(n.assigned());
+        assert!(n.agent_live());
+        assert_eq!(n.execution_state(), ExecutionState::Inactive);
+        assert_eq!(live_state(&n).as_deref(), Some("idle"));
+        n.activity.as_mut().unwrap().effective_model = None;
+        n.activity.as_mut().unwrap().coordinator_model = Some("invented/gpt-6.1-sol".into());
+        let label = cells(&n, None, None, None).activity_model.unwrap();
+        assert!(
+            label.contains("child-a") && !label.contains("Sol"),
+            "a known worker with unknown model must not borrow the coordinator's model: {label}"
+        );
+        let mut second = n.clone();
+        second.id = "fruit-2".into();
+        assert_eq!(Counts::over([&n, &second]).live_agents, 1);
+        n.activity.as_mut().unwrap().worker_execution = Some(ExecutionState::Unknown);
+        assert_eq!(live_state(&n).as_deref(), Some("idle · ?"));
+        n.activity.as_mut().unwrap().worker_presence = Some(PresenceState::Unknown);
+        assert!(!n.agent_live());
+        assert!(n.assigned());
+        assert_eq!(live_state(&n), None);
+    }
+
+    #[test]
+    fn headless_owner_presence_never_becomes_per_bead_execution() {
+        use crate::collect::omo::Activity;
+        let mut n = node("fruit-1", Status::InProgress);
+        n.activity=Some(serde_json::from_value::<Activity>(serde_json::json!({"state":"Unknown","project":"summit-works","bead_id":"fruit-1","attempt_id":"attempt-a","coordinator":"owner-a","coordinator_model":"invented/gpt-6.1-sol","coordinator_presence":"live_idle","worker_type":"direct","acceptance_ready":false,"evidence":[]})).unwrap());
+        assert!(n.assigned());
+        assert!(n.agent_live());
+        assert_eq!(live_state(&n).as_deref(), Some("owner idle · ?"));
+        n.activity.as_mut().unwrap().coordinator_presence =
+            Some(crate::collect::omo::PresenceState::LiveBusy);
+        assert_eq!(live_state(&n).as_deref(), Some("owner live · ?"));
+        n.activity.as_mut().unwrap().coordinator_model = None;
+        n.activity.as_mut().unwrap().effective_model = Some("invented/gpt-6-luna".into());
+        let label = cells(&n, None, None, None).activity_model.unwrap();
+        assert!(
+            label.contains("owner-a") && !label.contains("Luna"),
+            "a live coordinator with unknown model must not borrow the worker's model: {label}"
+        );
+        n.activity.as_mut().unwrap().worker_type = Some("delegate".into());
+        assert_eq!(live_state(&n).as_deref(), Some("coord live · ?"));
     }
 
     fn agent(source: JoinSource) -> AgentRef {

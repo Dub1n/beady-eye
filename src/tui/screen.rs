@@ -1948,6 +1948,7 @@ mod tests {
             speaks_until: BTreeMap::new(),
             collected: trees,
             out_of_focus: BTreeSet::new(),
+            off_focus_workers: Vec::new(),
             projects: vec!["grove".to_string()],
             views: Vec::new(),
             scope: Scope::default(),

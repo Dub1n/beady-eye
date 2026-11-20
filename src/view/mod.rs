@@ -235,6 +235,8 @@ pub enum Said {
 /// third kind needs no third path to the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
+    /// Distinct beads with qualified delegated execution outside focus.
+    OffFocusActivity(usize, bool),
     /// The agent provider is installed and would not answer, so no row can
     /// show an agent. A provider nobody installed is not this: nothing was
     /// lost, so there is nothing to say.
@@ -537,7 +539,10 @@ mod tests {
     /// Every fact said at the foot of the screen. See [`every_failure_kind`].
     pub(super) fn every_notice() -> impl Iterator<Item = Notice> {
         std::iter::successors(Some(Notice::AgentsUnknown), |fact| match fact {
-            Notice::AgentsUnknown => Some(Notice::SessionUnanswered("a session".to_string())),
+            Notice::AgentsUnknown => Some(Notice::OffFocusActivity(1, true)),
+            Notice::OffFocusActivity(_, _) => {
+                Some(Notice::SessionUnanswered("a session".to_string()))
+            }
             Notice::SessionUnanswered(_) => Some(Notice::NoInboundChannel),
             Notice::NoInboundChannel => Some(Notice::AnotherBdiHadTheInboundChannel),
             Notice::AnotherBdiHadTheInboundChannel => Some(Notice::ConfigWouldNotReload),

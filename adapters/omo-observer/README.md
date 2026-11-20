@@ -55,7 +55,7 @@ the actual tool result agree. Each admission is scoped by project, bead, attempt
 task, parent session, tool call and native task creation. Current worker presence
 and execution come from a separate bounded baseline. The observer stores atomic
 short-lived frames and bounded per-parent admission continuity files; a retained
-admission can preserve settled worker identity only when the native task's run
+admission can preserve a settled worker session association only when the native task's run
 generation still matches. It cannot establish live presence, execution,
 acceptance or successful validation by itself.
 

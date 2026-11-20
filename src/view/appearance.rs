@@ -99,6 +99,11 @@ mod tests {
         for (activity, expected) in cases {
             let activity = Activity {
                 state: activity,
+                worker_presence: None,
+                worker_execution: None,
+                worker_identity: None,
+                coordinator_presence: None,
+                coordinator_identity: None,
                 project: String::new(),
                 bead_id: String::new(),
                 attempt_id: None,
@@ -125,6 +130,11 @@ mod tests {
         assert_eq!(marker(&Status::Pinned, None), "[P]");
         let finished = Activity {
             state: ActivityState::Finished,
+            worker_presence: None,
+            worker_execution: None,
+            worker_identity: None,
+            coordinator_presence: None,
+            coordinator_identity: None,
             project: String::new(),
             bead_id: String::new(),
             attempt_id: None,
@@ -147,6 +157,11 @@ mod tests {
         assert_eq!(marker(&Status::Closed, Some(&finished)), "[x]");
         let stale = Activity {
             state: ActivityState::Working,
+            worker_presence: None,
+            worker_execution: None,
+            worker_identity: None,
+            coordinator_presence: None,
+            coordinator_identity: None,
             fresh: Some(false),
             ..finished
         };
@@ -172,6 +187,11 @@ mod tests {
         ] {
             let activity = Activity {
                 state,
+                worker_presence: None,
+                worker_execution: None,
+                worker_identity: None,
+                coordinator_presence: None,
+                coordinator_identity: None,
                 project: String::new(),
                 bead_id: String::new(),
                 attempt_id: None,

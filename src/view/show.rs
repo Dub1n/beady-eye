@@ -655,6 +655,11 @@ fn said_styled(
         let mut facts = vec![
             format!("State: {}", activity.state_label()),
             format!(
+                "Worker presence: {:?}; coordinator presence: {:?}",
+                activity.presence_state(),
+                activity.coordinator_presence
+            ),
+            format!(
                 "Execution: {:?}; assigned: {}; live agent: {}",
                 node.execution_state(),
                 node.assigned(),
@@ -668,7 +673,12 @@ fn said_styled(
             ("Task", activity.task_id.as_deref()),
             ("Attempt", activity.attempt_id.as_deref()),
             ("Child session", activity.child_session.as_deref()),
+            ("Worker instance", activity.worker_identity.as_deref()),
             ("Coordinator", activity.coordinator.as_deref()),
+            (
+                "Coordinator instance",
+                activity.coordinator_identity.as_deref(),
+            ),
             ("Coordinator model", activity.coordinator_model.as_deref()),
         ] {
             if let Some(value) = value {
@@ -707,12 +717,19 @@ fn said_styled(
         }
         facts.extend(activity.evidence.iter().map(|e| format!("Evidence: {e}")));
         for (index, worker) in activity.workers.iter().enumerate() {
-            facts.push(format!("Worker {}: {}", index + 1, worker.state_label()));
+            facts.push(format!(
+                "Worker {}: {}; presence: {:?}; execution: {:?}",
+                index + 1,
+                worker.state_label(),
+                worker.presence_state(),
+                worker.execution_state()
+            ));
             for (label, value) in [
                 ("Task", worker.task_id.as_deref()),
                 ("Name", worker.worker_name.as_deref()),
                 ("Model", worker.effective_model.as_deref()),
                 ("Session", worker.child_session.as_deref()),
+                ("Instance", worker.worker_identity.as_deref()),
             ] {
                 if let Some(value) = value {
                     facts.push(format!("  {label}: {value}"));
@@ -1236,6 +1253,11 @@ mod tests {
         let mut bead = a_bead();
         bead.activity = Some(Activity {
             state: ActivityState::Finished,
+            worker_presence: None,
+            worker_execution: None,
+            worker_identity: None,
+            coordinator_presence: None,
+            coordinator_identity: None,
             project: bead.project.clone(),
             bead_id: bead.id.clone(),
             attempt_id: Some("invented-attempt".into()),

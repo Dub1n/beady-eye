@@ -148,6 +148,37 @@ impl Snapshot {
     /// Keep, in each project a bead is named in, only the trees holding one
     /// of those beads.
     pub fn narrow_to(&mut self, named: &[BeadKey]) {
+        let mut off_focus = std::collections::BTreeSet::new();
+        if !named.is_empty() {
+            for tree in &self.collected {
+                for bead in &tree.beads {
+                    if !named.iter().any(|key| key.project == bead.project)
+                        || bead.status.is_finished()
+                        || bead.disposable_fixture
+                        || !bead
+                            .activity
+                            .as_ref()
+                            .is_some_and(|activity| activity.has_active_delegated_worker())
+                    {
+                        continue;
+                    }
+                    let in_focus = self.collected.iter().any(|tree| {
+                        named.iter().any(|key| {
+                            tree.project == key.project
+                                && (tree.root == key.id
+                                    || tree.beads.iter().any(|node| node.is(key)))
+                        }) && tree
+                            .beads
+                            .iter()
+                            .any(|node| node.project == bead.project && node.id == bead.id)
+                    });
+                    if !in_focus {
+                        off_focus.insert(super::OffFocusWorker::delegated(&bead.project, &bead.id));
+                    }
+                }
+            }
+        }
+        self.off_focus_workers = off_focus.into_iter().collect();
         self.collected.retain(|tree| {
             let here: Vec<&BeadKey> = named
                 .iter()

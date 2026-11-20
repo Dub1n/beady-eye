@@ -41,7 +41,7 @@ pub enum Tail {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target<'a> {
     Pane(&'a PaneKey),
-    /// A bead nobody is working.
+    /// A bead with no linked pane; headless work may still be active.
     NoAgent,
     /// A tree's own line, one of the groups below the forest, or something in
     /// a group that names no pane.
@@ -399,6 +399,7 @@ mod tests {
             speaks_until: BTreeMap::new(),
             collected: vec![tree],
             out_of_focus: BTreeSet::new(),
+            off_focus_workers: Vec::new(),
             projects: vec!["dunwich".to_string()],
             views: Vec::new(),
             scope: Scope::default(),

@@ -178,6 +178,11 @@ mod tests {
     fn worker(attempt: &str, task: &str, state: ActivityState, n: i64) -> Activity {
         Activity {
             state,
+            worker_presence: None,
+            worker_execution: None,
+            worker_identity: None,
+            coordinator_presence: None,
+            coordinator_identity: None,
             project: "orchard".into(),
             bead_id: "fruit-1".into(),
             attempt_id: Some(attempt.into()),

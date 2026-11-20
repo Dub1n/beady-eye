@@ -59,6 +59,7 @@ pub(in crate::tui) fn a_snapshot() -> Snapshot {
         speaks_until: BTreeMap::new(),
         collected: vec![tree],
         out_of_focus: BTreeSet::new(),
+        off_focus_workers: Vec::new(),
         projects: vec!["arkham".to_string()],
         views: Vec::new(),
         scope: Scope::default(),
