@@ -10,6 +10,13 @@ the beads they wait on change, and settles the beads that wait on GitHub.
 `bd` is all it needs. It will also look at whatever else you leave lying
 about, and each thing you let it see gives it more to do.
 
+**Optional local work integration:** the [work writer](docs/work-integration.md)
+can run named fixtures and verify accepted evidence in a separate sealed
+archive while the checkout and tracker remain writable. See
+[installation and capability probes](docs/local-work-distribution.md) before
+enabling it. Launching the viewer does not install a writer, grant permission,
+or run a check.
+
 - **It keeps the goals in view.** Each tracker's work is drawn as a tree, with
   a goal at the root and the work it waits on beneath it. With a lot of agents
   at work it is easy to lose sight of what they are working towards, and the

@@ -295,14 +295,11 @@ ownership tree projects the same complete dependency snapshot used by
 details, dependencies and JSON. Unsupported versions provide no work or
 worker inference.
 
-## Gate ownership
+## What to verify when upgrading
 
-Step 3 owns the policy decision matrix, no-store behavior, portable CLI,
-tracker and report/receipt regressions. Include nested roots, aliases,
-worktree store separation and both kinds of deadline. Step 4 owns package
-activation, same evaluator wiring, policy reload and revocation at the native
-hook, project-scoped observer and reader integration, and the disposable
-configuration template. Step 5 owns a real combined host run with two
-configured projects, same-looking IDs, a rejected cross-project or missing
-marker and actual nested work, passive reading and acceptance. Step 6 owns
-synchronized stale result/owner rejection and bounded native replacement.
+Run the writer's policy and receipt tests, then verify the capability through
+the loaded CLI and OmO tool. Use two disposable projects to check isolation,
+including similar bead IDs, missing or wrong-project dispatch markers, and
+revoked grants. Exercise the fixture's primary, cleanup and verification
+actions on the intended runtime. A policy decision, a completed native
+task, and a passing check are not interchangeable evidence of acceptance.

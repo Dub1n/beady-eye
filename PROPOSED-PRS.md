@@ -5,6 +5,17 @@ are ready to submit or that the maintainer has agreed to them. Each proposal mus
 stand on its own against upstream, with its own rationale, tests and CI evidence.
 The fork can continue evolving while individual proposals are prepared.
 
+## Fork-only integration: guarded checks and opt-in recording
+
+Keep the optional [writer](docs/work-integration.md), project policy and
+OmO work adapter independent from the passive viewer. A sealed archive
+protects the archived copies; it does not freeze the checkout. Qualify
+the specific consumer fixture and cleanup separately. Any proposal for
+this work needs the operator-pinned distribution, real CLI/OmO tests,
+and compatibility with existing work records. Keep the capture scheduler
+fork-side; reports consume observations, not a reconstructed activity log.
+No upstream submission is implied by publishing these sources in the fork.
+
 Reviewed on 2026-11-14 against upstream
 `6cebfddd045ee6468ed06b6deb77b4748d536a3d` and fork
 `a4098292bd9b61e9557b1b5f89400c4fc30e1f7a` (0.42.2). Upstream's current head matched

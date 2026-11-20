@@ -1,5 +1,17 @@
 # Intended changes: compact trees and passive agent activity
 
+## Guarded work and evidence
+
+- [x] Keep the viewer passive. The separate work writer uses an exact
+  project policy; a repository or a bead cannot grant that permission.
+- [x] Let a project select a pinned, named fixture without accepting
+  arbitrary commands. Detect changed evidence after cleanup and keep
+  protected execution distinct from trusted execution.
+- [x] Verify a separate root-owned immutable archive against accepted
+  Beads digests while the checkout and tracker remain writable.
+- [x] Record scoped pane observations without treating missed intervals
+  as proof that a worker was active or idle.
+
 ## Orchestrator evidence follow-up
 
 ### Correlation and work records

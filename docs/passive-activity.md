@@ -7,6 +7,11 @@ viewer does not start gates, mutate a tracker or require agents to register.
 
 ## Installation
 
+Register the [optional observer](../adapters/omo-observer/README.md) separately
+from the [work writer](work-integration.md). Build and verify one local
+release as described in [local work distribution](local-work-distribution.md).
+Starting `bdi` does not activate the writer or change its project policy.
+
 The Herdr plugin builds this fork's source using Rust 1.88 or newer:
 
 ```sh

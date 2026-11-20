@@ -1,6 +1,9 @@
 > Fork additions: [compact rows, navigation and passive OmO activity](passive-activity.md)
 > documents `[omo.<project>]`, `[fixture_filters.<project>]`, and the additional
 > `[row]` options. Those sections supersede upstream row/navigation defaults below.
+> Writer permissions and named fixtures belong in the operator's
+> [work policy](work-integration.md), not in viewer settings. Configuring a
+> project here does not authorize commands or grant access to an archive.
 
 # Configuring `bdi`
 
