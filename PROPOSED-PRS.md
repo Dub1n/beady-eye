@@ -527,6 +527,12 @@ in `src/app/collection.rs`, snapshot activity fields and execution details.
 maintained adapter could reduce core conflicts, but adds a contract to maintain.
 Assess that trade-off before building a framework around one integration.
 
+The fork's [observer evidence limits](adapters/omo-observer/README.md#evidence-and-limits)
+summarize the finite hosted, in-process and detached-process checks. Extract
+the adapter contract before selecting any provider for upstream. Keep
+prospective admissions, expiring current observations and retained settled
+identity separate; none confers an acceptance or preview-routing guarantee.
+
 **0.44.0 follow-up to proposal 9:** Missing models can be recovered passively from
 exact native worker sessions or an explicitly configured coordinator directory.
 Reads verify IDs, bound directory/body/cache sizes and preserve incremental scan

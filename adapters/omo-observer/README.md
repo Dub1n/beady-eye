@@ -74,6 +74,24 @@ and do not establish compatibility with every OmO host release. Unsupported
 modes remain unavailable rather than falling back to conversational
 attribution.
 
+### What has been exercised
+
+In disposable OmO 5.1.69 and Beads 1.3.4 runs, authenticated hosted workers
+were observed across abort/resume, same-task child replacement, host loss
+and reconstruction, a fresh guarded attempt, and native completion. Separate
+earlier observer revisions exercised in-process and detached-process workers
+in the same versions. Those earlier runs do not qualify the current revision
+in those modes. Late delivery and identifier reuse have fixture coverage;
+these runs do not establish universal support for nested, DAG, workpool or
+cross-namespace sources.
+
+Dispatch and events help identify or schedule a read; they do not decide
+whether a worker is active. Current native identity and a fresh worker
+baseline establish sampled activity. A source gap expires rather than
+renewing an old observation. Qualify the observer and viewer together before
+enabling a changed runtime or source mode. This is not event replay or a
+guarantee that an interactive preview can still attach to the sampled worker.
+
 Run the package tests from the repository root:
 
 ```sh
