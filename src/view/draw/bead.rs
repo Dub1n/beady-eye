@@ -235,6 +235,15 @@ impl Walk<'_> {
         columns(&walked.spans)
     }
 
+    fn watched(&self, walked: &mut Walked) {
+        if self.row.watched {
+            walked.cell(Span::styled(
+                if self.layout.ascii { "*" } else { "◉" },
+                palette::AGENT,
+            ));
+        }
+    }
+
     fn cell(&self, walked: &mut Walked, cell: &Cell, agent: Option<&str>) {
         let row = self.row;
         match cell {
@@ -293,6 +302,29 @@ impl Walk<'_> {
                 }
             }
             Cell::Agent => {
+                if self.layout.compact {
+                    if let (Some(nickname), Some(state)) =
+                        (&row.live_worker_nickname, &row.live_agent_state)
+                    {
+                        let marker = if self.layout.ascii { "@" } else { "◍" };
+                        // Keep state ahead of user-supplied text when fitting
+                        // cuts the cell. Drop the model before cutting the name.
+                        let short = format!("{marker} {state} · {nickname}");
+                        let model = row.activity.as_ref().and_then(|a| a.model_label());
+                        let label =
+                            model.map_or_else(|| short.clone(), |m| format!("{short} · {m}"));
+                        let at = walked.cell(Span::styled(label, palette::AGENT));
+                        if model.is_some() {
+                            walked.shorter.push(Shorter {
+                                block: walked.block,
+                                at,
+                                said: short,
+                            });
+                        }
+                        self.watched(walked);
+                        return;
+                    }
+                }
                 let label = if self.layout.compact {
                     row.activity_model
                         .as_deref()
@@ -360,12 +392,7 @@ impl Walk<'_> {
                         palette::AGENT,
                     ));
                 }
-                if row.watched {
-                    walked.cell(Span::styled(
-                        if self.layout.ascii { "*" } else { "◉" }.to_string(),
-                        palette::AGENT,
-                    ));
-                }
+                self.watched(walked);
             }
             Cell::Anomalies => {
                 if let Some(anomalies) = row::anomaly_marker(&row.anomalies) {

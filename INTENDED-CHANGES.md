@@ -1,5 +1,14 @@
 # Intended changes: compact trees and passive agent activity
 
+## Optional OmO Native worker nicknames
+
+- [x] Read a display-only nickname from an already linked native task record;
+  keep task identity, steering handle and activity qualification independent.
+- [x] Show the nickname in worker details and on live compact rows, preserving
+  status and keeping model context where it fits.
+- [x] Verify with invented data that absent or invalid nicknames keep the
+  existing display and that repeated labels never collapse workers.
+
 ## Checkout cleanup and viewer follow-ups
 
 - [x] Move the enduring worker-evidence design into maintained documentation;

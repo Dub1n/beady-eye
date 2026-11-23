@@ -188,6 +188,7 @@ mod tests {
             attempt_id: Some(attempt.into()),
             task_id: Some(task.into()),
             worker_name: None,
+            worker_nickname: None,
             worker_type: None,
             effective_model: None,
             child_session: None,

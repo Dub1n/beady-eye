@@ -139,6 +139,8 @@ pub struct Row {
     /// Passive execution record for details and activity-aware rendering.
     pub activity: Option<Activity>,
     pub activity_model: Option<String>,
+    /// A live single worker's display label, for compact layouts only.
+    pub(super) live_worker_nickname: Option<String>,
     /// Current terminal/worker state, separate from workflow status.
     pub live_agent_state: Option<String>,
     pub agent_identity: Option<String>,
@@ -608,6 +610,22 @@ pub fn cells(
             } else {
                 a.owner_label()
             }
+        }),
+        live_worker_nickname: node.activity.as_ref().and_then(|activity| {
+            use crate::collect::omo::{ExecutionState, PresenceState};
+            use crate::model::join::JoinSource;
+
+            let nickname = activity.worker_nickname.as_ref()?;
+            if activity.workers.len() > 1 {
+                return None;
+            }
+            let worker_is_live = activity.presence_state() != PresenceState::Unknown
+                || node.execution_state() == ExecutionState::Active
+                || node
+                    .agent
+                    .as_ref()
+                    .is_some_and(|agent| agent.source == JoinSource::NativeWorker);
+            worker_is_live.then(|| nickname.clone())
         }),
         live_agent_state: live_state(node),
         agent_identity: node
