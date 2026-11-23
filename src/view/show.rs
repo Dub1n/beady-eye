@@ -652,6 +652,23 @@ fn said_styled(
             "EXECUTION (stored bead status unchanged)",
             palette::TITLE,
         )]);
+        let detail_width = width.saturating_sub(2).max(1);
+        let mut render_facts = |facts: &mut Vec<String>, nickname: Option<&str>| {
+            for fact in facts.drain(..) {
+                rows.extend(
+                    markdown::rows(&fact, detail_width)
+                        .into_iter()
+                        .map(indented),
+                );
+            }
+            if let Some(nickname) = nickname {
+                rows.extend(
+                    markdown::wrapped(&format!("Nickname: {nickname}"), detail_width)
+                        .into_iter()
+                        .map(indented),
+                );
+            }
+        };
         let mut facts = vec![
             format!("State: {}", activity.state_label()),
             format!(
@@ -666,9 +683,17 @@ fn said_styled(
                 node.agent_live()
             ),
         ];
+        render_facts(&mut facts, activity.worker_nickname.as_deref());
         for (label, value) in [
             ("Model", activity.effective_model.as_deref()),
-            ("Worker", activity.worker_name.as_deref()),
+            (
+                if activity.worker_nickname.is_some() {
+                    "Worker handle"
+                } else {
+                    "Worker"
+                },
+                activity.worker_name.as_deref(),
+            ),
             ("Worker type", activity.worker_type.as_deref()),
             ("Task", activity.task_id.as_deref()),
             ("Attempt", activity.attempt_id.as_deref()),
@@ -716,6 +741,7 @@ fn said_styled(
             facts.push("Source is last known / stale".into());
         }
         facts.extend(activity.evidence.iter().map(|e| format!("Evidence: {e}")));
+        render_facts(&mut facts, None);
         for (index, worker) in activity.workers.iter().enumerate() {
             facts.push(format!(
                 "Worker {}: {}; presence: {:?}; execution: {:?}",
@@ -724,9 +750,17 @@ fn said_styled(
                 worker.presence_state(),
                 worker.execution_state()
             ));
+            render_facts(&mut facts, worker.worker_nickname.as_deref());
             for (label, value) in [
                 ("Task", worker.task_id.as_deref()),
-                ("Name", worker.worker_name.as_deref()),
+                (
+                    if worker.worker_nickname.is_some() {
+                        "Handle"
+                    } else {
+                        "Name"
+                    },
+                    worker.worker_name.as_deref(),
+                ),
                 ("Model", worker.effective_model.as_deref()),
                 ("Session", worker.child_session.as_deref()),
                 ("Instance", worker.worker_identity.as_deref()),
@@ -739,14 +773,7 @@ fn said_styled(
                 facts.push(format!("  Source observation: {}", observed.to_rfc3339()));
             }
             facts.extend(worker.evidence.iter().map(|e| format!("  Evidence: {e}")));
-        }
-
-        for fact in facts {
-            rows.extend(
-                markdown::rows(&fact, width.saturating_sub(2).max(1))
-                    .into_iter()
-                    .map(indented),
-            );
+            render_facts(&mut facts, None);
         }
     }
     match &node.watching {
@@ -1263,6 +1290,7 @@ mod tests {
             attempt_id: Some("invented-attempt".into()),
             task_id: None,
             worker_name: None,
+            worker_nickname: None,
             worker_type: None,
             effective_model: None,
             child_session: None,

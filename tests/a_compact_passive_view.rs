@@ -46,6 +46,119 @@ fn active_headless_worker_counts_without_an_observer() {
 }
 
 #[test]
+fn compact_native_worker_nickname_is_optional_and_does_not_label_an_aggregate() {
+    use serde_json::json;
+    use std::fs;
+
+    for (label, nickname, two_workers) in [
+        ("nickname-legacy", None, false),
+        ("nickname-invalid", Some("Selene\u{1b}[31m"), false),
+        ("nickname-one", Some("Selene*"), false),
+        ("nickname-multiple", Some("Selene*"), true),
+    ] {
+        let home = a_home_naming_one_project_settled(
+            label,
+            "[row]\ncompact=true\nshow_ids=false\nascii=true\n",
+        );
+        let tasks = home.join("native-tasks");
+        fs::create_dir(&tasks).unwrap();
+        let cfg = home.join(".config/beady-eye/config.toml");
+        let mut config = fs::read_to_string(&cfg).unwrap();
+        config.push_str(&format!(
+            "\n[omo.arkham]\ntask_directory='{}'\n",
+            tasks.display()
+        ));
+        fs::write(cfg, config).unwrap();
+
+        let mut receipts = Vec::new();
+        for (task, child, handle) in [
+            ("task-review", "child-review", "review-worker"),
+            ("task-check", "child-check", "check-worker"),
+        ]
+        .into_iter()
+        .take(if two_workers { 2 } else { 1 })
+        {
+            let mut record = json!({
+                "task_id": task, "parent_session_id": "owner-a", "child_session_id": child,
+                "name": handle, "status": "running", "updated_at": chrono::Utc::now(),
+                "model": "invented/gpt-6-sol",
+                "effective_model": {"display": "invented/gpt-6-luna"}
+            });
+            if let Some(nickname) = nickname {
+                record["nickname"] = nickname.into();
+            }
+            fs::write(tasks.join(format!("{task}.json")), record.to_string()).unwrap();
+            receipts.push(json!({"attemptId":"attempt-a","taskId":task,"childSession":child}));
+        }
+        let tracker = ShimmedTracker::beside(&home);
+        tracker.holds(
+            &json!([{
+                "id":"ark-review", "title":"Review inventory", "status":"in_progress",
+                "priority":2, "issue_type":"task",
+                "metadata":{
+                    "qrclipWork":{"attempt":{"id":"attempt-a","coordinator":"owner-a","mode":"delegate"}},
+                    "qrclipDispatch":receipts
+                }
+            }])
+            .to_string(),
+        );
+
+        let mut bdi = Driven::bdi(32, 100, home, &tracker.environment());
+        bdi.read_until(ENTER_ALTERNATE_SCREEN, GIVING_UP);
+        bdi.read_until(b"active", GIVING_UP);
+        let named = label == "nickname-one";
+        for (rows, cols) in [(33, 100), (34, 43), (35, 39)] {
+            let repaint = bdi.resize(rows, cols);
+            let screen = bdi.answer_to(repaint, GIVING_UP);
+            let text = terminal::rows_drawn(&screen);
+            let row = text
+                .iter()
+                .find(|row| row.contains("Review inve"))
+                .unwrap_or_else(|| panic!("{label} {cols}: {text:?}"));
+            assert!(
+                row.contains("[~]") && row.contains("active"),
+                "{label} {cols}: {row}"
+            );
+            assert_eq!(row.contains("Sele"), named, "{label} {cols}: {row}");
+            if named {
+                let expected = if cols == 39 { "Sele…" } else { "Selene*" };
+                assert!(row.contains(expected), "{label} {cols}: {row}");
+            }
+            if cols == 100 || !named {
+                assert!(row.contains("Luna"), "{label} {cols}: {row}");
+            } else {
+                assert!(!row.contains("Luna"), "{label} {cols}: {row}");
+            }
+        }
+        let repaint = bdi.resize(64, 100);
+        bdi.answer_to(repaint, GIVING_UP);
+        let repaint = bdi.send(b"/ark-review\r");
+        bdi.answer_to(repaint, GIVING_UP);
+        let repaint = bdi.send(b"\r");
+        let screen = bdi.answer_to(repaint, GIVING_UP);
+        assert_eq!(
+            terminal::window_over(&screen).as_deref(),
+            Some("ark-review")
+        );
+        let text = terminal::rows_drawn(&screen).join("\n");
+        assert!(
+            text.contains("review-worker") && text.contains("task-review"),
+            "{label}: {text}"
+        );
+        if two_workers {
+            assert!(
+                text.contains("check-worker") && text.contains("task-check"),
+                "{text}"
+            );
+            assert_eq!(text.matches("Nickname: Selene*").count(), 2, "{text}");
+        } else {
+            assert_eq!(text.contains("Nickname: Selene*"), named, "{label}: {text}");
+        }
+        bdi.send(b"\x1bq");
+    }
+}
+
+#[test]
 fn compact_native_completion_is_visible_and_details_work_at_sidebar_widths() {
     for colour_brackets in [true, false] {
         for cols in [30, 40, 60, 80] {
@@ -592,7 +705,8 @@ fn future_observation_draws_idle_headless_worker_and_preserves_detail_identity()
         serde_json::json!({
             "task_id":"st_future","created_at":"2026-01-01T00:00:00Z",
             "updated_at":now,"status":"running","parent_session_id":"owner-a",
-            "child_session_id":"child-new"
+            "child_session_id":"child-new","nickname":"Juniper",
+            "model":"invented/gpt-6-sol"
         })
         .to_string(),
     )
@@ -642,7 +756,11 @@ fn future_observation_draws_idle_headless_worker_and_preserves_detail_identity()
     let mark = bdi.resize(33, 120);
     let screen = bdi.answer_to(mark, GIVING_UP);
     let text = terminal::rows_drawn(&screen).join("\n");
-    assert!(text.contains("Luna") && text.contains("idle"), "{text}");
+    assert!(
+        text.lines()
+            .any(|row| row.contains("Juniper") && row.contains("Luna") && row.contains("idle")),
+        "{text}"
+    );
     assert!(
         !text.contains("trees with no live agent"),
         "idle headless worker should keep tree live: {text}"

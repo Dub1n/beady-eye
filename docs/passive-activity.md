@@ -569,6 +569,17 @@ Output contains identifiers and should be treated as private local data.
 
 ### Worker identity and observed history
 
+If an already-linked OmO Native task record has a valid top-level string
+`nickname`, compact rows show it for a live worker, ahead of the optional
+model label. Details show the nickname and steering handle separately. A
+nickname is a display label, not an identifier: workers can share it, and a
+model change does not rename a worker. A multi-worker row keeps its aggregate
+label; individual nicknames are available in details.
+
+The field is optional. Stock OmO/Senpi records that omit it and records with an
+invalid or blank value keep their existing labels. No OmO patch, observer
+change, or new configuration is required.
+
 Delegated rows name the worker model separately from the coordinator model.
 The details explain why execution is unknown, and distinguish a finished worker
 from acceptance of the bead. The viewer keeps a bounded, in-memory history of

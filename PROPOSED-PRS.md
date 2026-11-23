@@ -545,6 +545,14 @@ it independently of the native provider. Review the interval and provider call
 cost before changing upstream defaults; retain the covered-project, bounded
 queue and focus-ordering tests.
 
+**Optional native worker nicknames:** This is a fork-side display follow-up,
+not a dependency on a patched OmO/Senpi. Keep it with the optional collector
+and compact renderer if extracting this proposal. The native label is
+advisory; it cannot change admission, linkage, freshness, or acceptance.
+Carry the invented stock-record, invalid-label and multi-worker PTY cases
+with any extraction. Confirm the upstream provider/UI contract and run the
+shared contribution gate before proposing it upstream.
+
 **0.44.0 follow-up to proposal 9:** Missing models can be recovered passively from
 exact native worker sessions or an explicitly configured coordinator directory.
 Reads verify IDs, bound directory/body/cache sizes and preserve incremental scan

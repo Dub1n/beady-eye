@@ -163,6 +163,9 @@ pub struct Activity {
     pub attempt_id: Option<String>,
     pub task_id: Option<String>,
     pub worker_name: Option<String>,
+    /// Display label only; never a handle or an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_nickname: Option<String>,
     pub worker_type: Option<String>,
     pub effective_model: Option<String>,
     pub child_session: Option<String>,
@@ -363,7 +366,7 @@ pub struct Reader {
 /// Only collector metadata survives parsing. Unknown values (including nested
 /// conversation data) are consumed with IgnoredAny, never materialized as Value.
 #[derive(Debug, Clone, PartialEq)]
-struct NativeRecord(Value);
+struct NativeRecord(Value, Option<String>);
 
 #[derive(Clone, Copy)]
 enum NativeFields {
@@ -402,7 +405,7 @@ impl<'de> Visitor<'de> for NativeFields {
                     "task_id" | "project" | "bead_id" | "attempt_id" | "coordinator"
                     | "parent_session_id" | "child_session_id" | "model" | "effectiveModel"
                     | "agent_type" | "workerType" | "name" | "workerName" | "status" | "updated_at"
-                    | "created_at",
+                    | "created_at" | "nickname",
                 )
                 | (Self::Model, "display" | "provider" | "model_id") => Some(Self::String),
                 _ => None,
@@ -468,7 +471,24 @@ impl<'de> Visitor<'de> for NativeFields {
 
 impl<'de> Deserialize<'de> for NativeRecord {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        NativeFields::Task.deserialize(deserializer).map(Self)
+        let mut fields = NativeFields::Task.deserialize(deserializer)?;
+        // Keep display metadata out of the existing observation readback
+        // comparison, so it cannot qualify or disqualify worker activity.
+        let nickname = fields
+            .as_object_mut()
+            .and_then(|record| record.remove("nickname"))
+            .and_then(|value| {
+                let nickname = value.as_str()?;
+                if nickname.chars().any(|ch| {
+                    ch.is_control()
+                        || matches!(ch, '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+                }) {
+                    return None;
+                }
+                let nickname = nickname.trim();
+                (!nickname.is_empty()).then(|| nickname.chars().take(MAX_STRING).collect())
+            });
+        Ok(Self(fields, nickname))
     }
 }
 
@@ -837,7 +857,7 @@ impl Reader {
                 return result;
             }
         };
-        let value = value.0;
+        let NativeRecord(value, nickname) = value;
         let last_known = source_stale.is_some();
         let updated_at = text(&value, "updated_at")
             .and_then(|v| DateTime::parse_from_rfc3339(&v).ok())
@@ -1116,6 +1136,7 @@ impl Reader {
             result.worker_execution = Some(ExecutionState::Unknown);
             result.worker_presence = Some(PresenceState::Unknown);
         }
+        result.worker_nickname = nickname;
         let check = current_check(
             input,
             &self.config.check_path,
@@ -1276,6 +1297,7 @@ fn empty_activity(input: &BeadInput) -> Activity {
         attempt_id: None,
         task_id: None,
         worker_name: None,
+        worker_nickname: None,
         worker_type: None,
         effective_model: None,
         child_session: None,
@@ -1575,6 +1597,54 @@ mod tests {
     }
 
     #[test]
+    fn linked_nickname_is_optional_display_metadata() {
+        let cases = [
+            (None, None),
+            (Some(serde_json::json!(" Selene ")), Some("Selene")),
+            (Some(serde_json::json!("  ")), None),
+            (Some(serde_json::json!(["Selene"])), None),
+            (Some(serde_json::json!("Selene\u{1b}[31m")), None),
+            (Some(serde_json::json!("Selene\nWorker")), None),
+            (Some(serde_json::json!("Selene\u{202e}")), None),
+        ];
+        for (nickname, expected) in cases {
+            let mut value = record("running");
+            value["name"] = "review-worker".into();
+            if let Some(nickname) = nickname {
+                value["nickname"] = nickname;
+            }
+            let mut reader = reader_with(value);
+            let batch = reader.collect(&[input()]);
+            let activity = batch.activities.values().next().unwrap();
+            assert_eq!(activity.worker_nickname.as_deref(), expected);
+            assert_eq!(activity.worker_name.as_deref(), Some("review-worker"));
+            assert_eq!(activity.task_id.as_deref(), Some("task-1"));
+            assert_eq!(activity.execution_state(), ExecutionState::Active);
+            let json = serde_json::to_value(activity).unwrap();
+            assert_eq!(
+                json.get("worker_nickname").and_then(Value::as_str),
+                expected
+            );
+            assert_eq!(json.get("worker_nickname").is_some(), expected.is_some());
+            fs::remove_dir_all(reader.config.task_directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn unlinked_native_record_does_not_supply_a_nickname() {
+        let mut value = record("running");
+        value["nickname"] = "Selene".into();
+        let mut reader = reader_with(value);
+        let mut row = input();
+        row.fields["metadata"]["qrclipDispatch"]["childSession"] = Value::Null;
+        let batch = reader.collect(&[row]);
+        let activity = batch.activities.values().next().unwrap();
+        assert_eq!(activity.worker_nickname, None);
+        assert_eq!(activity.execution_state(), ExecutionState::Unknown);
+        fs::remove_dir_all(reader.config.task_directory).unwrap();
+    }
+
+    #[test]
     fn off_focus_execution_requires_current_delegated_worker_evidence() {
         let mut worker = empty_activity(&input());
         worker.attempt_id = Some("attempt".into());
@@ -1673,16 +1743,19 @@ mod tests {
             // Wrongly typed identity fields must not retain arbitrary objects.
             task[key]["provider"] = serde_json::json!({"text":secret});
         }
-        let expected = NativeRecord(serde_json::json!({
-            "task_id":"task-1", "parent_session_id":"coord-1",
-            "child_session_id":"session-1", "name":"worker", "agent_type":"agent",
-            "model":"chatgpt-subscription/gpt-6-luna", "status":"completed",
-            "updated_at":task["updated_at"], "created_at":task["created_at"],
-            "effective_model": {"provider":null, "model_id":"gpt-6-luna",
-                "display":"chatgpt-subscription/gpt-6-luna"},
-            "resolved_model": {"provider":null, "model_id":"gpt-6-luna",
-                "display":"chatgpt-subscription/gpt-6-luna"}
-        }));
+        let expected = NativeRecord(
+            serde_json::json!({
+                "task_id":"task-1", "parent_session_id":"coord-1",
+                "child_session_id":"session-1", "name":"worker", "agent_type":"agent",
+                "model":"chatgpt-subscription/gpt-6-luna", "status":"completed",
+                "updated_at":task["updated_at"], "created_at":task["created_at"],
+                "effective_model": {"provider":null, "model_id":"gpt-6-luna",
+                    "display":"chatgpt-subscription/gpt-6-luna"},
+                "resolved_model": {"provider":null, "model_id":"gpt-6-luna",
+                    "display":"chatgpt-subscription/gpt-6-luna"}
+            }),
+            None,
+        );
         let mut reader = reader_with(task);
         let batch = reader.collect(&[input()]);
         let activity = batch.activities.values().next().unwrap();
@@ -1731,11 +1804,14 @@ mod tests {
         .unwrap();
         assert_eq!(
             parsed,
-            NativeRecord(serde_json::json!({
-                "task_id":"task-1", "status":null, "name":null, "version":null,
-                "effective_model":{"display":null,"provider":"demo","model_id":"demo-model"},
-                "resolved_model":"fallback/model"
-            }))
+            NativeRecord(
+                serde_json::json!({
+                    "task_id":"task-1", "status":null, "name":null, "version":null,
+                    "effective_model":{"display":null,"provider":"demo","model_id":"demo-model"},
+                    "resolved_model":"fallback/model"
+                }),
+                None
+            )
         );
         assert_eq!(
             model_string(&parsed.0["effective_model"]).as_deref(),
